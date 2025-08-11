@@ -1,0 +1,15 @@
+{
+  "name": "travel-photo-sharing",
+  "version": "1.0.0",
+  "description": "여행 사진 공유 플랫폼",
+  "scripts": {
+    "start": "cd frontend && npm start",
+    "build": "cd frontend && npm run build",
+    "server": "cd backend && python run_server.py",
+    "dev": "concurrently \"npm run server\" \"npm start\"",
+    "install-all": "cd backend && pip install -r requirements.txt && cd ../frontend && npm install"
+  },
+  "keywords": ["travel", "photo", "sharing", "react", "fastapi"],
+  "author": "Travel Photo Team",
+  "license": "MIT"
+}

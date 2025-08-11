@@ -1,0 +1,727 @@
+# 한국 여행 사진 공유 플랫폼 Ubuntu 배포 가이드
+
+## 목차
+1. [서버 기본 설정](#1-서버-기본-설정)
+2. [필수 소프트웨어 설치](#2-필수-소프트웨어-설치)
+3. [데이터베이스 설정](#3-데이터베이스-설정)
+4. [애플리케이션 배포](#4-애플리케이션-배포)
+5. [웹 서버 설정](#5-웹-서버-설정)
+6. [SSL 인증서 설정](#6-ssl-인증서-설정)
+7. [프로세스 관리 설정](#7-프로세스-관리-설정)
+8. [모니터링 및 로그 설정](#8-모니터링-및-로그-설정)
+9. [백업 설정](#9-백업-설정)
+10. [운영 명령어](#10-운영-명령어)
+
+---
+
+## 1. 서버 기본 설정
+
+### 1.1 시스템 업데이트
+```bash
+# 시스템 패키지 업데이트
+sudo apt update && sudo apt upgrade -y
+
+# 필수 유틸리티 설치
+sudo apt install -y curl wget git unzip software-properties-common apt-transport-https ca-certificates gnupg lsb-release
+```
+
+### 1.2 방화벽 설정
+```bash
+# UFW 방화벽 활성화
+sudo ufw enable
+
+# 기본 포트 허용
+sudo ufw allow ssh
+sudo ufw allow 80/tcp    # HTTP
+sudo ufw allow 443/tcp   # HTTPS
+
+# 개발용 포트 (필요시)
+sudo ufw allow 3000/tcp  # React dev server
+sudo ufw allow 8000/tcp  # FastAPI dev server
+
+# 방화벽 상태 확인
+sudo ufw status
+```
+
+### 1.3 사용자 설정
+```bash
+# root 사용자로 직접 작업 진행
+# SSH 키 설정 (로컬에서 생성한 키를 복사)
+# 로컬에서: ssh-copy-id root@your-server-ip
+```
+
+---
+
+## 2. 필수 소프트웨어 설치
+
+### 2.1 Node.js 설치 (React 빌드용)
+```bash
+# NodeSource repository 추가
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+
+# Node.js 설치
+sudo apt install -y nodejs
+
+# 버전 확인
+node --version
+npm --version
+```
+
+### 2.2 Python 설치 (FastAPI용)
+```bash
+# Python 3.11 설치
+sudo apt install -y python3.11 python3.11-venv python3.11-dev python3-pip
+
+# pip 업그레이드
+python3.11 -m pip install --upgrade pip
+```
+
+### 2.3 Nginx 설치
+```bash
+# Nginx 설치
+sudo apt install -y nginx
+
+# Nginx 시작 및 자동 시작 설정
+service nginx start
+update-rc.d nginx enable
+
+# 상태 확인
+service nginx status
+```
+
+### 2.4 Supervisor 설치 (프로세스 관리용)
+```bash
+# Supervisor 설치
+sudo apt install -y supervisor
+
+# 시작 및 자동 시작 설정
+service supervisor start
+update-rc.d supervisor enable
+```
+
+---
+
+## 3. 데이터베이스 설정
+
+### 3.1 SQLite 설정 (개발/소규모용)
+```bash
+# SQLite는 기본 설치되어 있음
+sqlite3 --version
+
+# 데이터베이스 디렉토리 생성
+mkdir -p /var/lib/triphoto
+chown root:root /var/lib/triphoto
+```
+
+### 3.2 PostgreSQL 설정 (운영용 권장)
+```bash
+# PostgreSQL 설치
+sudo apt install -y postgresql postgresql-contrib
+
+# PostgreSQL 사용자 및 데이터베이스 생성
+sudo -u postgres psql
+
+# PostgreSQL 콘솔에서 실행:
+CREATE USER triphoto WITH PASSWORD 'your_secure_password';
+CREATE DATABASE triphoto_db OWNER triphoto;
+GRANT ALL PRIVILEGES ON DATABASE triphoto_db TO triphoto;
+\q
+
+# PostgreSQL 시작 및 자동 시작 설정
+service postgresql start
+update-rc.d postgresql enable
+```
+
+---
+
+## 4. 애플리케이션 배포
+
+### 4.1 프로젝트 복사
+```bash
+# 프로젝트 디렉토리 생성
+mkdir -p /opt/triphoto
+chown root:root /opt/triphoto
+
+# Git을 통한 코드 배포
+cd /opt/triphoto
+git clone https://github.com/your-username/triphoto.git .
+
+# 또는 파일 복사
+# scp -r /local/path/to/triphoto/ root@server:/opt/triphoto/
+```
+
+### 4.2 백엔드 설정
+```bash
+cd /opt/triphoto/backend
+
+# Python 가상환경 생성
+python3.11 -m venv venv
+source venv/bin/activate
+
+# 의존성 설치
+pip install -r requirements.txt
+
+# .env 파일 지원을 위한 python-dotenv 확인 (requirements.txt에 포함되어 있음)
+
+# 환경 변수 파일 생성
+cat > .env << EOF
+# 데이터베이스 설정 (환경변수로 절대 경로 지정)
+DATABASE_URL=sqlite:////var/lib/triphoto/triphoto.db
+# 또는 PostgreSQL 사용시:
+# DATABASE_URL=postgresql://triphoto:your_secure_password@localhost/triphoto_db
+
+# 보안 설정
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+JWT_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+
+# 서버 설정
+HOST=0.0.0.0
+PORT=8000
+ENVIRONMENT=production
+DEBUG=False
+
+# CORS 설정
+ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+
+# 파일 업로드 설정
+UPLOAD_DIR=/opt/triphoto/uploads
+MAX_FILE_SIZE=10485760  # 10MB
+ALLOWED_FILE_TYPES=image/jpeg,image/png,image/gif,image/webp
+
+# 로그 설정
+LOG_LEVEL=INFO
+LOG_FILE=/var/log/triphoto/backend.log
+EOF
+
+# 로그 디렉토리 생성
+mkdir -p /var/log/triphoto
+chown root:root /var/log/triphoto
+
+# 업로드 디렉토리 생성
+mkdir -p /opt/triphoto/uploads
+chmod 755 /opt/triphoto/uploads
+
+# 데이터베이스 초기화 (필요시)
+# python -c "from app.database.database import engine; from app.models.models import Base; Base.metadata.create_all(bind=engine)"
+
+# 백엔드 서버 테스트 실행
+python -c "
+import sys
+sys.path.append('/opt/triphoto/backend')
+try:
+    from app.main import app
+    print('✅ FastAPI 앱 로드 성공')
+except Exception as e:
+    print(f'❌ FastAPI 앱 로드 실패: {e}')
+    exit(1)
+"
+```
+
+### 4.3 프론트엔드 빌드
+```bash
+cd /opt/triphoto/frontend
+
+# 의존성 설치
+npm install
+
+# 환경 변수 설정
+cat > .env.production << EOF
+REACT_APP_API_URL=https://yourdomain.com/api
+GENERATE_SOURCEMAP=false
+EOF
+
+# 프로덕션 빌드
+npm run build
+
+# 빌드 성공 확인
+if [ -d "build" ] && [ -f "build/index.html" ]; then
+    echo "✅ React 빌드 성공"
+else
+    echo "❌ React 빌드 실패"
+    exit 1
+fi
+
+# 빌드 파일을 웹 서버 디렉토리로 복사
+mkdir -p /var/www/triphoto
+cp -r build/* /var/www/triphoto/
+chown -R www-data:www-data /var/www/triphoto
+
+# 파일 권한 설정
+find /var/www/triphoto -type f -exec chmod 644 {} \;
+find /var/www/triphoto -type d -exec chmod 755 {} \;
+```
+
+---
+
+## 5. 웹 서버 설정
+
+### 5.1 Nginx 설정
+```bash
+# Nginx 사이트 설정 파일 생성
+tee /etc/nginx/sites-available/triphoto << EOF
+# HTTP에서 HTTPS로 리다이렉트
+server {
+    listen 80;
+    server_name yourdomain.com www.yourdomain.com;
+    return 301 https://\$server_name\$request_uri;
+}
+
+# HTTPS 서버 설정
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com www.yourdomain.com;
+
+    # SSL 인증서 경로 (Let's Encrypt 예시)
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+
+    # SSL 보안 설정
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # 보안 헤더
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-Frame-Options DENY;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Referrer-Policy "strict-origin-when-cross-origin";
+
+    # 파일 업로드 크기 제한
+    client_max_body_size 10M;
+
+    # 정적 파일 (React 앱)
+    location / {
+        root /var/www/triphoto;
+        try_files \$uri \$uri/ /index.html;
+        
+        # 캐시 설정
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    # API 프록시 (FastAPI)
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+        
+        # 타임아웃 설정
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # 업로드된 파일 서빙 (FastAPI를 통해)
+    location ~ ^/(uploads|photos)/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # 캐시 설정
+        expires 1d;
+        add_header Cache-Control "public";
+    }
+
+    # 로그 설정
+    access_log /var/log/nginx/triphoto_access.log;
+    error_log /var/log/nginx/triphoto_error.log;
+}
+EOF
+
+# 사이트 활성화
+ln -s /etc/nginx/sites-available/triphoto /etc/nginx/sites-enabled/
+rm /etc/nginx/sites-enabled/default
+
+# Nginx 설정 테스트
+nginx -t
+
+# Nginx 재시작
+service nginx reload
+```
+
+---
+
+## 6. SSL 인증서 설정
+
+### 6.1 Let's Encrypt 설치
+```bash
+# Certbot 설치
+apt install -y certbot python3-certbot-nginx
+
+# SSL 인증서 발급
+certbot --nginx -d yourdomain.com -d www.yourdomain.com
+
+# 자동 갱신 설정
+crontab -e
+# 다음 라인 추가:
+# 0 12 * * * /usr/bin/certbot renew --quiet
+
+# 자동 갱신 테스트
+certbot renew --dry-run
+```
+
+---
+
+## 7. 프로세스 관리 설정
+
+### 7.1 Supervisor를 이용한 FastAPI 서비스 관리
+```bash
+# Supervisor 설정 파일 생성
+tee /etc/supervisor/conf.d/triphoto-backend.conf << EOF
+[program:triphoto-backend]
+command=/opt/triphoto/backend/venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+directory=/opt/triphoto/backend
+user=root
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/supervisor/triphoto-backend.log
+stderr_logfile=/var/log/supervisor/triphoto-backend-error.log
+environment=PATH="/opt/triphoto/backend/venv/bin"
+EOF
+
+# Supervisor 설정 리로드
+supervisorctl reread
+supervisorctl update
+
+# 서비스 시작
+supervisorctl start triphoto-backend
+
+# 상태 확인
+supervisorctl status
+```
+
+### 7.2 Docker 환경 참고사항
+```bash
+# Docker 컨테이너에서는 Systemd가 제대로 작동하지 않으므로
+# Supervisor를 주요 프로세스 관리자로 사용하는 것을 권장합니다.
+
+# 수동 백엔드 실행 (테스트용)
+cd /opt/triphoto/backend
+source venv/bin/activate
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4 &
+
+# 프로세스 확인
+ps aux | grep "uvicorn.*triphoto"
+
+# 프로세스 종료
+pkill -f "uvicorn.*triphoto"
+```
+
+---
+
+## 8. 모니터링 및 로그 설정
+
+### 8.1 로그 로테이션 설정
+```bash
+# 로그 로테이션 설정
+tee /etc/logrotate.d/triphoto << EOF
+/var/log/nginx/triphoto_*.log {
+    daily
+    missingok
+    rotate 52
+    compress
+    delaycompress
+    notifempty
+    create 644 www-data www-data
+    postrotate
+        /bin/kill -USR1 \$(cat /var/run/nginx.pid 2>/dev/null) 2>/dev/null || true
+    endscript
+}
+
+/var/log/supervisor/triphoto-*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    create 644 root root
+}
+EOF
+```
+
+### 8.2 모니터링 스크립트
+```bash
+# 모니터링 스크립트 생성
+tee /usr/local/bin/triphoto-monitor.sh << 'EOF'
+#!/bin/bash
+LOG_FILE="/var/log/triphoto-monitor.log"
+DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
+# 서비스 상태 확인
+check_service() {
+    local service=$1
+    if service $service status > /dev/null 2>&1; then
+        echo "[$DATE] $service is running" >> $LOG_FILE
+    else
+        echo "[$DATE] ERROR: $service is not running" >> $LOG_FILE
+        service $service restart
+    fi
+}
+
+# 디스크 사용량 확인
+check_disk() {
+    DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+    if [ $DISK_USAGE -gt 85 ]; then
+        echo "[$DATE] WARNING: Disk usage is ${DISK_USAGE}%" >> $LOG_FILE
+    fi
+}
+
+# 메모리 사용량 확인
+check_memory() {
+    MEMORY_USAGE=$(free | grep Mem | awk '{printf "%.0f", $3/$2 * 100.0}')
+    if [ $MEMORY_USAGE -gt 85 ]; then
+        echo "[$DATE] WARNING: Memory usage is ${MEMORY_USAGE}%" >> $LOG_FILE
+    fi
+}
+
+# 확인 실행
+check_service nginx
+check_service triphoto-backend
+check_disk
+check_memory
+EOF
+
+# 실행 권한 부여
+chmod +x /usr/local/bin/triphoto-monitor.sh
+
+# 크론탭에 추가 (5분마다 실행)
+crontab -e
+# 다음 라인 추가:
+# */5 * * * * /usr/local/bin/triphoto-monitor.sh
+
+# 참고: Docker 환경에서는 호스트의 cron 또는 외부 스케줄러 사용 권장
+```
+
+---
+
+## 9. 백업 설정
+
+### 9.1 데이터베이스 백업
+```bash
+# 백업 스크립트 생성
+tee /usr/local/bin/triphoto-backup.sh << 'EOF'
+#!/bin/bash
+BACKUP_DIR="/opt/backups/triphoto"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+# 백업 디렉토리 생성
+mkdir -p $BACKUP_DIR
+
+# 데이터베이스 백업 (SQLite)
+if [ -f "/var/lib/triphoto/triphoto.db" ]; then
+    cp /var/lib/triphoto/triphoto.db $BACKUP_DIR/db_backup_$DATE.db
+    gzip $BACKUP_DIR/db_backup_$DATE.db
+fi
+
+# PostgreSQL 백업 (사용시)
+# pg_dump -U triphoto -h localhost triphoto_db | gzip > $BACKUP_DIR/db_backup_$DATE.sql.gz
+
+# 업로드 파일 백업
+tar -czf $BACKUP_DIR/uploads_backup_$DATE.tar.gz -C /opt/triphoto uploads/
+
+# 설정 파일 백업
+tar -czf $BACKUP_DIR/config_backup_$DATE.tar.gz /etc/nginx/sites-available/triphoto /opt/triphoto/backend/.env
+
+# 오래된 백업 삭제 (30일 이상)
+find $BACKUP_DIR -name "*.gz" -mtime +30 -delete
+
+echo "Backup completed: $DATE"
+EOF
+
+# 실행 권한 부여
+chmod +x /usr/local/bin/triphoto-backup.sh
+
+# 백업 디렉토리 생성
+mkdir -p /opt/backups/triphoto
+chown root:root /opt/backups
+
+# 일일 백업 크론탭 설정
+crontab -e
+# 다음 라인 추가:
+# 0 2 * * * /usr/local/bin/triphoto-backup.sh
+
+# 참고: Docker 환경에서는 호스트의 cron 또는 외부 백업 솔루션 사용 권장
+```
+
+---
+
+## 10. 운영 명령어
+
+### 10.1 서비스 관리
+```bash
+# 백엔드 서비스 관리 (Supervisor 사용 권장)
+supervisorctl start triphoto-backend   # 시작
+supervisorctl stop triphoto-backend    # 정지
+supervisorctl restart triphoto-backend # 재시작
+supervisorctl status triphoto-backend  # 상태 확인
+
+# Nginx 관리
+service nginx reload                   # 설정 리로드
+service nginx restart                  # 재시작
+nginx -t                              # 설정 테스트
+
+# Supervisor 관리 (사용시)
+supervisorctl status                 # 상태 확인
+supervisorctl restart triphoto-backend  # 재시작
+supervisorctl tail triphoto-backend     # 로그 확인
+```
+
+### 10.2 로그 확인
+```bash
+# 백엔드 로그 (Docker 환경에서는 Supervisor 로그 사용)
+tail -f /var/log/supervisor/triphoto-backend.log        # 실시간 로그
+tail -f /var/log/supervisor/triphoto-backend-error.log  # 에러 로그
+
+# Nginx 로그
+tail -f /var/log/nginx/triphoto_access.log
+tail -f /var/log/nginx/triphoto_error.log
+
+# 애플리케이션 로그 (설정한 경우)
+tail -f /var/log/triphoto/backend.log
+```
+
+### 10.3 업데이트 배포
+```bash
+# 1. 백업 실행
+/usr/local/bin/triphoto-backup.sh
+
+# 2. 코드 업데이트
+cd /opt/triphoto
+git pull origin main
+
+# 3. 백엔드 의존성 업데이트 (필요시)
+cd backend
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 4. 프론트엔드 빌드 업데이트
+cd ../frontend
+npm install
+npm run build
+cp -r build/* /var/www/triphoto/
+chown -R www-data:www-data /var/www/triphoto
+
+# 5. 서비스 재시작
+supervisorctl restart triphoto-backend
+service nginx reload
+```
+
+### 10.4 문제 해결
+```bash
+# 디스크 사용량 확인
+df -h
+
+# 메모리 사용량 확인
+free -h
+
+# 프로세스 확인
+ps aux | grep python
+ps aux | grep nginx
+
+# 포트 사용 확인
+netstat -tlnp | grep :8000
+netstat -tlnp | grep :80
+
+# 방화벽 상태 확인
+ufw status verbose
+
+# SSL 인증서 상태 확인
+certbot certificates
+
+# 서비스 연결 테스트
+curl -I http://localhost:8000/api/docs  # FastAPI 헬스체크
+curl -I http://localhost/             # Nginx 테스트
+curl -I https://yourdomain.com/       # HTTPS 테스트
+
+# 파일 권한 문제 해결
+chown -R root:root /opt/triphoto
+chown -R www-data:www-data /var/www/triphoto
+chmod -R 755 /opt/triphoto/uploads
+
+# 로그 레벨별 확인 (Docker 환경)
+grep "ERROR" /var/log/supervisor/triphoto-backend-error.log | tail -20    # 최근 에러 20개
+grep "WARNING" /var/log/supervisor/triphoto-backend.log | tail -20        # 최근 경고 20개
+```
+
+---
+
+## 추가 고려사항
+
+### 보안 강화
+```bash
+# fail2ban 설치 (무차별 대입 공격 방지)
+apt install -y fail2ban
+
+# fail2ban 설정
+tee /etc/fail2ban/jail.local << EOF
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 5
+
+[sshd]
+enabled = true
+port = ssh
+logpath = /var/log/auth.log
+
+[nginx-http-auth]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/error.log
+
+[nginx-limit-req]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/error.log
+EOF
+
+# fail2ban 시작
+service fail2ban start
+update-rc.d fail2ban enable
+
+# SSH 보안 강화
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+tee -a /etc/ssh/sshd_config << EOF
+# 보안 강화 설정
+PermitRootLogin yes
+PasswordAuthentication no
+PubkeyAuthentication yes
+MaxAuthTries 3
+ClientAliveInterval 300
+ClientAliveCountMax 2
+EOF
+
+service ssh restart
+```
+
+- 정기적인 시스템 업데이트
+- 불필요한 포트 차단
+- SSH 키 기반 인증만 허용
+
+### 성능 최적화
+- Redis 캐시 서버 설정
+- CDN 사용 고려
+- 이미지 최적화 및 압축
+- 데이터베이스 인덱스 최적화
+
+### 고가용성
+- 로드 밸런서 설정
+- 데이터베이스 복제
+- 자동 스케일링 설정
+
+이 가이드를 따라하면 Ubuntu 서버에서 안정적으로 한국 여행 사진 공유 플랫폼을 운영할 수 있습니다.

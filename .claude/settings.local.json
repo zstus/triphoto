@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(npx create-react-app:*)",
+      "Bash(rm:*)",
+      "Bash(npm install:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(source:*)",
+      "Bash(pkill:*)",
+      "Bash(ls:*)",
+      "Bash(sqlite3:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(claude --version)",
+      "Bash(node:*)",
+      "Bash(git --version)",
+      "Bash(pip3 install:*)",
+      "Bash(pipx:*)",
+      "Bash(brew install:*)",
+      "Bash(arch -arm64 brew install pipx)",
+      "Bash(export PATH=\"$PATH:/Users/kurt/.local/bin\")",
+      "Bash(SuperClaude --version)",
+      "Bash(SuperClaude install:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(tar:*)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "Bash(curl:*)",
+      "Bash(npm run start-host:*)",
+      "Bash(true)"
+    ],
+    "deny": []
+  }
+}
