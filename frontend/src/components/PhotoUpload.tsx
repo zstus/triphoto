@@ -69,8 +69,8 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
 
   // Batch upload utility function
   const uploadFilesInBatches = async (files: File[], userName: string) => {
-    const BATCH_SIZE = 5; // 5개씩 배치 업로드
-    const BATCH_DELAY = 1000; // 배치 간 1초 대기
+    const BATCH_SIZE = 3; // 3개씩 배치 업로드 (더 안전)
+    const BATCH_DELAY = 5000; // 배치 간 5초 대기 (rate limiting 안전)
     
     const totalFiles = files.length;
     let completedFiles = 0;
