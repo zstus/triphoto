@@ -53,7 +53,7 @@ async def upload_photo(
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     
-    upload_dir = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
+    upload_dir = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "uploads"))
     
     try:
         file_data = await save_uploaded_file(file, upload_dir, validated_room_id)
@@ -299,7 +299,7 @@ async def download_photo(request: Request, room_id: str, photo_id: str, db = Dep
     # Validate file path to prevent directory traversal
     try:
         safe_path = FileSecurityUtils.sanitize_upload_path(
-            os.path.join(os.path.dirname(__file__), "..", "..", "uploads"), 
+            os.path.join(os.path.dirname(__file__), "..", "uploads"), 
             os.path.basename(file_path)
         )
         # Ensure the actual file path matches the sanitized path
