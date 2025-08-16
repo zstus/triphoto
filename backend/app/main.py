@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer
@@ -129,10 +129,10 @@ app.include_router(dislikes.router, prefix="/api/dislikes", tags=["dislikes"])
 
 @app.get("/")
 @limiter.limit("10/minute")
-async def root(request):
+async def root(request: Request):
     return {"message": "Travel Photo Sharing API", "version": "1.0.0"}
 
 @app.get("/health")
 @limiter.limit("30/minute")
-async def health_check(request):
+async def health_check(request: Request):
     return {"status": "healthy", "database": "connected"}
