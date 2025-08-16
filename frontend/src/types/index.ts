@@ -21,6 +21,9 @@ export interface Photo {
   taken_at?: string;
   uploaded_at: string;
   like_count: number;
+  dislike_count: number;
+  user_liked?: boolean;
+  user_disliked?: boolean;
 }
 
 export interface Like {
@@ -46,4 +49,21 @@ export interface LikeCreate {
 
 export interface RoomJoin {
   user_name: string;
+}
+
+export interface Dislike {
+  id: string;
+  photo_id: string;
+  user_name: string;
+  created_at: string;
+}
+
+export interface DislikeCreate {
+  user_name: string;
+}
+
+export interface Participant {
+  name: string;
+  photo_count: number;
+  first_upload_at: string;
 }

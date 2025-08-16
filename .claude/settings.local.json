@@ -30,7 +30,12 @@
       "mcp__context7__get-library-docs",
       "Bash(curl:*)",
       "Bash(npm run start-host:*)",
-      "Bash(true)"
+      "Bash(true)",
+      "Bash(git ls-tree:*)",
+      "Bash(git submodule:*)",
+      "Bash(git rm:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }
