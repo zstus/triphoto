@@ -35,7 +35,9 @@
       "Bash(git submodule:*)",
       "Bash(git rm:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(cp:*)",
+      "Bash(git push:*)"
     ],
     "deny": []
   }
