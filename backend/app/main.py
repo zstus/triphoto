@@ -128,7 +128,7 @@ app.include_router(likes.router, prefix="/api/likes", tags=["likes"])
 app.include_router(dislikes.router, prefix="/api/dislikes", tags=["dislikes"])
 
 @app.get("/")
-@limiter.limit("100/minute")
+@limiter.limit("60/minute")
 async def root(request: Request):
     return {"message": "Travel Photo Sharing API", "version": "1.0.0"}
 
