@@ -23,7 +23,10 @@
     "start": "react-scripts start",
     "start-host": "HOST=0.0.0.0 react-scripts start",
     "build": "react-scripts build",
+    "build:analyze": "npm run build && npx serve -s build",
+    "build:prod": "NODE_ENV=production npm run build",
     "test": "react-scripts test",
+    "test:coverage": "react-scripts test --coverage --watchAll=false",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {

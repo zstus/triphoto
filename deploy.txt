@@ -253,39 +253,20 @@ find /var/www/triphoto -type d -exec chmod 755 {} \;
 
 ---
 
-## 5. 웹 서버 설정
+## 5. 웹 서버 설정 (Synology NAS Docker 환경)
 
-### 5.1 Nginx 설정
+### 5.1 Nginx 설정 (HTTP 전용)
 ```bash
 # Nginx 사이트 설정 파일 생성
 tee /etc/nginx/sites-available/triphoto << EOF
-# HTTP에서 HTTPS로 리다이렉트
+# HTTP 서버 설정 (Docker 환경 - 포트 80에서 서비스)
 server {
     listen 80;
-    server_name yourdomain.com www.yourdomain.com;
-    return 301 https://\$server_name\$request_uri;
-}
+    server_name zstus.synology.me localhost _;
 
-# HTTPS 서버 설정
-server {
-    listen 443 ssl http2;
-    server_name yourdomain.com www.yourdomain.com;
-
-    # SSL 인증서 경로 (Let's Encrypt 예시)
-    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-
-    # SSL 보안 설정
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    # 보안 헤더
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # 보안 헤더 (HTTPS 관련 제외)
     add_header X-Content-Type-Options nosniff;
-    add_header X-Frame-Options DENY;
+    add_header X-Frame-Options SAMEORIGIN;
     add_header X-XSS-Protection "1; mode=block";
     add_header Referrer-Policy "strict-origin-when-cross-origin";
 
@@ -313,7 +294,7 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Proto http;
         proxy_cache_bypass \$http_upgrade;
         
         # 타임아웃 설정
@@ -326,10 +307,10 @@ server {
     location ~ ^/(uploads|photos)/ {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
         
         # 캐시 설정
         expires 1d;
@@ -353,32 +334,24 @@ nginx -t
 service nginx reload
 ```
 
----
-
-## 6. SSL 인증서 설정
-
-### 6.1 Let's Encrypt 설치
+### 5.2 Docker 환경 네트워크 설정 확인
 ```bash
-# Certbot 설치
-apt install -y certbot python3-certbot-nginx
+# 포트 매핑 확인 (Synology Docker Manager에서 설정)
+# Host Port: 8095 → Container Port: 80
 
-# SSL 인증서 발급
-certbot --nginx -d yourdomain.com -d www.yourdomain.com
+# 내부 연결 테스트
+curl -I http://localhost:80        # Nginx 테스트
+curl -I http://localhost:8000/api/docs  # FastAPI 테스트
 
-# 자동 갱신 설정
-crontab -e
-# 다음 라인 추가:
-# 0 12 * * * /usr/bin/certbot renew --quiet
-
-# 자동 갱신 테스트
-certbot renew --dry-run
+# 외부 접근 테스트 (다른 기기에서)
+# curl -I http://zstus.synology.me:8095
 ```
 
 ---
 
-## 7. 프로세스 관리 설정
+## 6. 프로세스 관리 설정 (Docker 환경)
 
-### 7.1 Supervisor를 이용한 FastAPI 서비스 관리
+### 6.1 Supervisor를 이용한 FastAPI 서비스 관리
 ```bash
 # Supervisor 설정 파일 생성
 tee /etc/supervisor/conf.d/triphoto-backend.conf << EOF
@@ -404,7 +377,7 @@ supervisorctl start triphoto-backend
 supervisorctl status
 ```
 
-### 7.2 Docker 환경 참고사항
+### 6.2 Docker 환경 수동 관리 (개발/테스트용)
 ```bash
 # Docker 컨테이너에서는 Systemd가 제대로 작동하지 않으므로
 # Supervisor를 주요 프로세스 관리자로 사용하는 것을 권장합니다.
@@ -423,9 +396,9 @@ pkill -f "uvicorn.*triphoto"
 
 ---
 
-## 8. 모니터링 및 로그 설정
+## 7. 모니터링 및 로그 설정 (Docker 환경)
 
-### 8.1 로그 로테이션 설정
+### 7.1 로그 로테이션 설정
 ```bash
 # 로그 로테이션 설정
 tee /etc/logrotate.d/triphoto << EOF
@@ -454,7 +427,7 @@ tee /etc/logrotate.d/triphoto << EOF
 EOF
 ```
 
-### 8.2 모니터링 스크립트
+### 7.2 Docker 환경 모니터링 스크립트
 ```bash
 # 모니터링 스크립트 생성
 tee /usr/local/bin/triphoto-monitor.sh << 'EOF'
@@ -491,27 +464,40 @@ check_memory() {
 
 # 확인 실행
 check_service nginx
-check_service triphoto-backend
+check_service supervisor  # Docker 환경에서는 supervisor 체크
 check_disk
 check_memory
+
+# Docker 환경 특화 체크
+check_triphoto_backend() {
+    if supervisorctl status triphoto-backend | grep RUNNING > /dev/null 2>&1; then
+        echo "[$DATE] triphoto-backend is running" >> $LOG_FILE
+    else
+        echo "[$DATE] ERROR: triphoto-backend is not running" >> $LOG_FILE
+        supervisorctl restart triphoto-backend
+    fi
+}
+
+check_triphoto_backend
 EOF
 
 # 실행 권한 부여
 chmod +x /usr/local/bin/triphoto-monitor.sh
 
-# 크론탭에 추가 (5분마다 실행)
-crontab -e
+# Docker 환경에서는 Synology Task Scheduler 또는 호스트 cron 사용 권장
+# 컨테이너 내부에서 cron 사용시:
+# apt install -y cron
+# service cron start
+# crontab -e
 # 다음 라인 추가:
 # */5 * * * * /usr/local/bin/triphoto-monitor.sh
-
-# 참고: Docker 환경에서는 호스트의 cron 또는 외부 스케줄러 사용 권장
 ```
 
 ---
 
-## 9. 백업 설정
+## 8. 백업 설정 (Docker 환경)
 
-### 9.1 데이터베이스 백업
+### 8.1 Docker 환경 백업 스크립트
 ```bash
 # 백업 스크립트 생성
 tee /usr/local/bin/triphoto-backup.sh << 'EOF'
@@ -550,19 +536,27 @@ chmod +x /usr/local/bin/triphoto-backup.sh
 mkdir -p /opt/backups/triphoto
 chown root:root /opt/backups
 
-# 일일 백업 크론탭 설정
-crontab -e
+# Docker 환경에서는 다음 방법 중 선택:
+# 1. Synology Task Scheduler 사용 (권장)
+# 2. 호스트에서 docker exec를 통한 백업
+# 3. 컨테이너 내부 cron 설정
+
+# 컨테이너 내부 cron 사용시:
+# apt install -y cron
+# service cron start  
+# crontab -e
 # 다음 라인 추가:
 # 0 2 * * * /usr/local/bin/triphoto-backup.sh
 
-# 참고: Docker 환경에서는 호스트의 cron 또는 외부 백업 솔루션 사용 권장
+# Synology 호스트에서 백업 실행 예시:
+# docker exec <container_name> /usr/local/bin/triphoto-backup.sh
 ```
 
 ---
 
-## 10. 운영 명령어
+## 9. 운영 명령어 (Docker 환경)
 
-### 10.1 서비스 관리
+### 9.1 Docker 환경 서비스 관리
 ```bash
 # 백엔드 서비스 관리 (Supervisor 사용 권장)
 supervisorctl start triphoto-backend   # 시작
@@ -581,7 +575,7 @@ supervisorctl restart triphoto-backend  # 재시작
 supervisorctl tail triphoto-backend     # 로그 확인
 ```
 
-### 10.2 로그 확인
+### 9.2 Docker 환경 로그 확인
 ```bash
 # 백엔드 로그 (Docker 환경에서는 Supervisor 로그 사용)
 tail -f /var/log/supervisor/triphoto-backend.log        # 실시간 로그
@@ -595,7 +589,7 @@ tail -f /var/log/nginx/triphoto_error.log
 tail -f /var/log/triphoto/backend.log
 ```
 
-### 10.3 업데이트 배포
+### 9.3 Docker 환경 업데이트 배포
 ```bash
 # 1. 백업 실행
 /usr/local/bin/triphoto-backup.sh
@@ -621,7 +615,7 @@ supervisorctl restart triphoto-backend
 service nginx reload
 ```
 
-### 10.4 문제 해결
+### 9.4 Docker 환경 문제 해결
 ```bash
 # 디스크 사용량 확인
 df -h
@@ -640,13 +634,10 @@ netstat -tlnp | grep :80
 # 방화벽 상태 확인
 ufw status verbose
 
-# SSL 인증서 상태 확인
-certbot certificates
-
-# 서비스 연결 테스트
+# Docker 환경 서비스 연결 테스트
 curl -I http://localhost:8000/api/docs  # FastAPI 헬스체크
-curl -I http://localhost/             # Nginx 테스트
-curl -I https://yourdomain.com/       # HTTPS 테스트
+curl -I http://localhost:80           # Nginx 테스트 (Docker 내부)
+curl -I http://zstus.synology.me:8095 # 외부 접근 테스트
 
 # 파일 권한 문제 해결
 chown -R root:root /opt/triphoto

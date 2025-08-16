@@ -27,8 +27,15 @@ const setCSRFToken = (token: string) => {
   csrfToken = token;
 };
 
-// 개발 환경에서는 현재 접속 방식에 따라 API URL을 동적으로 결정
+// API URL 결정 로직 - 환경 변수 우선, 그 다음 동적 결정
 const getApiBaseUrl = () => {
+  // 환경 변수가 설정되어 있으면 그것을 사용 (프로덕션 환경)
+  if (process.env.REACT_APP_API_URL) {
+    console.log('🌟 Using environment variable API URL:', process.env.REACT_APP_API_URL);
+    return process.env.REACT_APP_API_URL;
+  }
+  
+  // 개발 환경에서는 현재 접속 방식에 따라 API URL을 동적으로 결정
   const currentHostname = window.location.hostname;
   console.log('🔍 Current hostname:', currentHostname);
   

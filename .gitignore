@@ -31,8 +31,13 @@ travel_photos.db
 # Environment variables
 .env
 .env.local
-.env.production
+.env.production.local
 backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.production.local
+
+# Keep .env.production and .env.development for deployment reference
 
 # Logs
 *.log

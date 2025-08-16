@@ -7,6 +7,10 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 from .database.database import engine, database
 from .models import models
@@ -41,21 +45,34 @@ async def add_security_headers(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    
+    # Only add HSTS for HTTPS environments
+    if os.getenv("SECURITY_HEADERS_HSTS", "True").lower() == "true":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http://localhost:3000 http://127.0.0.1:3000 http://192.168.26.92:3000"
+    
+    # Dynamic CSP connect-src based on environment
+    connect_src = os.getenv("SECURITY_HEADERS_CSP_CONNECT_SRC", "http://localhost:3000")
+    response.headers["Content-Security-Policy"] = f"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' {connect_src}"
     return response
 
-# Enhanced CORS configuration
-allowed_origins = [
-    "http://localhost:3000",  # React dev server
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",  # Vite dev server
-    "http://127.0.0.1:5173",
-    "http://192.168.26.92:3000",  # Network IP access
-    "http://192.168.26.92:5173",
-    # Add your production domain here
-]
+# Environment-based CORS configuration
+def get_allowed_origins():
+    # Get from environment variable or use defaults
+    origins_env = os.getenv("ALLOWED_ORIGINS", "")
+    if origins_env:
+        return [origin.strip() for origin in origins_env.split(",") if origin.strip()]
+    
+    # Fallback to development defaults
+    return [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+allowed_origins = get_allowed_origins()
 
 app.add_middleware(
     CORSMiddleware,
@@ -66,7 +83,8 @@ app.add_middleware(
     expose_headers=["X-Total-Count"],
 )
 
-uploads_dir = os.path.join(os.path.dirname(__file__), "..", "uploads")
+# Environment-based upload directory configuration
+uploads_dir = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "uploads"))
 os.makedirs(uploads_dir, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 

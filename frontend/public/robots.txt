@@ -1,3 +1,12 @@
 # https://www.robotstxt.org/robotstxt.html
 User-agent: *
-Disallow:
+Allow: /
+Disallow: /api/
+Disallow: /uploads/
+Disallow: /photos/
+
+# Sitemap location
+Sitemap: http://zstus.synology.me:8095/sitemap.xml
+
+# Crawl delay for better server performance
+Crawl-delay: 1
