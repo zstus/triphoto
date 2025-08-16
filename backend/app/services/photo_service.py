@@ -90,11 +90,17 @@ async def save_uploaded_file(file, upload_dir: str, room_id: str) -> dict:
     if file_info.get("mime_type", "").startswith("image/"):
         thumbnail_created = create_thumbnail(file_path, thumbnail_path)
     
+    # DB에는 상대 경로만 저장 (URL 생성용)
+    relative_file_path = f"uploads/{room_id}/{filename}"
+    relative_thumbnail_path = f"uploads/{room_id}/thumb_{filename}" if thumbnail_created else None
+    
     return {
         "file_id": file_id,
         "filename": filename,
-        "file_path": file_path,
-        "thumbnail_path": thumbnail_path if thumbnail_created else None,
+        "file_path": file_path,  # 실제 파일 시스템 경로 (파일 작업용)
+        "relative_file_path": relative_file_path,  # DB 저장용 상대 경로
+        "thumbnail_path": thumbnail_path if thumbnail_created else None,  # 실제 파일 시스템 경로
+        "relative_thumbnail_path": relative_thumbnail_path,  # DB 저장용 상대 경로
         "taken_at": taken_at,
         **file_info
     }

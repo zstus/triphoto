@@ -109,8 +109,8 @@ async def upload_photo(
             "filename": file_data["filename"],
             "original_filename": file.filename,
             "uploader_name": validated_uploader,
-            "file_path": file_data["file_path"],
-            "thumbnail_path": file_data["thumbnail_path"],
+            "file_path": file_data["relative_file_path"],  # 상대 경로 저장
+            "thumbnail_path": file_data["relative_thumbnail_path"],  # 상대 경로 저장
             "file_size": file_data["file_size"],
             "mime_type": file_data["mime_type"],
             "file_hash": file_data["file_hash"],
@@ -135,8 +135,8 @@ async def upload_photo(
             filename=photo["filename"],
             original_filename=photo["original_filename"],  
             uploader_name=photo["uploader_name"],
-            file_path=f"/uploads/{validated_room_id}/{photo['filename']}",
-            thumbnail_path=f"/uploads/{validated_room_id}/thumb_{photo['filename']}" if photo["thumbnail_path"] else None,
+            file_path=f"/{photo['file_path']}" if photo["file_path"] else None,
+            thumbnail_path=f"/{photo['thumbnail_path']}" if photo["thumbnail_path"] else None,
             file_size=photo["file_size"],
             mime_type=photo["mime_type"],
             taken_at=photo["taken_at"],
@@ -190,8 +190,8 @@ async def get_room_photos(request: Request, room_id: str, db = Depends(get_datab
             filename=photo["filename"],
             original_filename=photo["original_filename"],
             uploader_name=photo["uploader_name"],
-            file_path=f"/uploads/{validated_room_id}/{photo['filename']}",
-            thumbnail_path=f"/uploads/{validated_room_id}/thumb_{photo['filename']}" if photo["thumbnail_path"] else None,
+            file_path=f"/{photo['file_path']}" if photo["file_path"] else None,
+            thumbnail_path=f"/{photo['thumbnail_path']}" if photo["thumbnail_path"] else None,
             file_size=photo["file_size"],
             mime_type=photo["mime_type"],
             taken_at=photo["taken_at"],
@@ -262,8 +262,8 @@ async def get_room_photos_with_user_status(
             filename=photo["filename"],
             original_filename=photo["original_filename"],
             uploader_name=photo["uploader_name"],
-            file_path=f"/uploads/{validated_room_id}/{photo['filename']}",
-            thumbnail_path=f"/uploads/{validated_room_id}/thumb_{photo['filename']}" if photo["thumbnail_path"] else None,
+            file_path=f"/{photo['file_path']}" if photo["file_path"] else None,
+            thumbnail_path=f"/{photo['thumbnail_path']}" if photo["thumbnail_path"] else None,
             file_size=photo["file_size"],
             mime_type=photo["mime_type"],
             taken_at=photo["taken_at"],
@@ -294,27 +294,31 @@ async def download_photo(request: Request, room_id: str, photo_id: str, db = Dep
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found")
     
-    file_path = photo["file_path"]
+    # DB에는 상대 경로가 저장되어 있음 (예: uploads/room_id/file.jpg)
+    relative_file_path = photo["file_path"]
+    
+    # 실제 파일 시스템 경로 생성
+    upload_base_dir = os.path.join(os.path.dirname(__file__), "..")
+    actual_file_path = os.path.join(upload_base_dir, relative_file_path.lstrip('/'))
     
     # Validate file path to prevent directory traversal
     try:
-        upload_base_dir = os.path.join(os.path.dirname(__file__), "..", "uploads")
-        room_upload_dir = os.path.join(upload_base_dir, validated_room_id)
+        room_upload_dir = os.path.join(upload_base_dir, "uploads", validated_room_id)
         safe_path = FileSecurityUtils.sanitize_upload_path(
             room_upload_dir, 
-            os.path.basename(file_path)
+            photo["filename"]
         )
         # Ensure the actual file path matches the sanitized path
-        if os.path.abspath(file_path) != safe_path:
+        if os.path.abspath(actual_file_path) != safe_path:
             raise HTTPException(status_code=403, detail="Invalid file path")
     except ValueError:
         raise HTTPException(status_code=403, detail="Invalid file path")
     
-    if not os.path.exists(file_path):
+    if not os.path.exists(actual_file_path):
         raise HTTPException(status_code=404, detail="File not found on disk")
     
     return FileResponse(
-        path=file_path,
+        path=actual_file_path,
         filename=photo["original_filename"],
         media_type=photo["mime_type"]
     )
