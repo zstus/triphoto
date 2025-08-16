@@ -67,6 +67,82 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
     }
   };
 
+  // Batch upload utility function
+  const uploadFilesInBatches = async (files: File[], userName: string) => {
+    const BATCH_SIZE = 5; // 5개씩 배치 업로드
+    const BATCH_DELAY = 1000; // 배치 간 1초 대기
+    
+    const totalFiles = files.length;
+    let completedFiles = 0;
+    let skippedFiles = 0;
+    const errors: string[] = [];
+
+    // 파일을 배치로 분할
+    const batches = [];
+    for (let i = 0; i < files.length; i += BATCH_SIZE) {
+      batches.push(files.slice(i, i + BATCH_SIZE));
+    }
+
+    // 각 배치를 순차적으로 처리
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      console.log(`📦 배치 ${batchIndex + 1}/${batches.length} 업로드 시작 (${batch.length}개 파일)`);
+
+      // 배치 내 파일들을 병렬 업로드
+      const batchPromises = batch.map(async (file) => {
+        try {
+          await photoApi.uploadPhoto(roomId, file, userName);
+          return { success: true, file, error: null };
+        } catch (error: any) {
+          return { success: false, file, error };
+        }
+      });
+
+      // 배치 완료 대기
+      const batchResults = await Promise.allSettled(batchPromises);
+      
+      // 배치 결과 처리
+      batchResults.forEach((result) => {
+        if (result.status === 'fulfilled') {
+          const { success, file, error } = result.value;
+          if (success) {
+            completedFiles++;
+          } else {
+            if (error.response?.status === 409) {
+              skippedFiles++;
+              errors.push(`${file.name}: 이미 업로드된 사진입니다`);
+            } else if (error.response?.status === 400) {
+              errors.push(`${file.name}: ${error.response.data?.detail || '잘못된 요청'}`);
+            } else if (error.response?.status === 413) {
+              errors.push(`${file.name}: 파일 크기가 너무 큽니다 (최대 10MB)`);
+            } else if (error.response?.status === 429) {
+              errors.push(`${file.name}: 요청이 너무 많습니다. 잠시 후 다시 시도해주세요`);
+            } else if (error.response?.status === 419) {
+              errors.push(`${file.name}: 보안 토큰 오류. 페이지를 새로고침해주세요`);
+            } else {
+              errors.push(`${file.name}: 업로드 실패 (${error.message || '알 수 없는 오류'})`);
+            }
+          }
+        } else {
+          // Promise.allSettled에서 rejected된 경우
+          errors.push(`알 수 없는 파일: 처리 실패`);
+        }
+      });
+
+      // 진행률 업데이트
+      const processedFiles = completedFiles + skippedFiles + errors.length;
+      setUploadProgress((processedFiles / totalFiles) * 100);
+
+      // 마지막 배치가 아니라면 대기
+      if (batchIndex < batches.length - 1) {
+        console.log(`⏳ 다음 배치까지 ${BATCH_DELAY/1000}초 대기...`);
+        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+      }
+    }
+
+    return { completedFiles, skippedFiles, errors };
+  };
+
   const handleUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) return;
 
@@ -93,34 +169,10 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
     setValidationErrors([]);
 
     try {
-      const totalFiles = selectedFiles.length;
-      let completedFiles = 0;
-      let skippedFiles = 0;
-      const errors: string[] = [];
-
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        try {
-          await photoApi.uploadPhoto(roomId, file, userName);
-          completedFiles++;
-        } catch (error: any) {
-          if (error.response?.status === 409) {
-            skippedFiles++;
-            errors.push(`${file.name}: 이미 업로드된 사진입니다`);
-          } else if (error.response?.status === 400) {
-            errors.push(`${file.name}: ${error.response.data?.detail || '잘못된 요청'}`);
-          } else if (error.response?.status === 413) {
-            errors.push(`${file.name}: 파일 크기가 너무 큽니다 (최대 10MB)`);
-          } else if (error.response?.status === 429) {
-            errors.push(`${file.name}: 요청이 너무 많습니다. 잠시 후 다시 시도해주세요`);
-          } else if (error.response?.status === 419) {
-            errors.push(`${file.name}: 보안 토큰 오류. 페이지를 새로고침해주세요`);
-          } else {
-            errors.push(`${file.name}: 업로드 실패 (${error.message || '알 수 없는 오류'})`);
-          }
-        }
-        setUploadProgress(((completedFiles + skippedFiles + errors.length) / totalFiles) * 100);
-      }
+      const files = Array.from(selectedFiles);
+      console.log(`🚀 ${files.length}개 파일 배치 업로드 시작`);
+      
+      const { completedFiles, skippedFiles, errors } = await uploadFilesInBatches(files, userName);
 
       setSelectedFiles(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
