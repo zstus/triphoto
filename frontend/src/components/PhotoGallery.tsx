@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Photo } from '../types';
-import { likeApi, dislikeApi, photoApi, roomApi } from '../services/api';
+import { likeApi, dislikeApi, photoApi, roomApi, getImageBaseUrl } from '../services/api';
 import { colors, spacing, shadows } from '../styles/responsive';
 import { downloadImage, isIOS, showImagePreview } from '../utils/downloadUtils';
 
@@ -167,7 +167,7 @@ const PhotoGallery: React.FC<PhotoGalleryProps> = ({ photos, roomId, onPhotosUpd
     try {
       if (isIOS()) {
         // iOS에서는 이미지 미리보기 모달을 표시
-        const imageUrl = `${window.location.protocol}//${window.location.hostname}:8000${photo.file_path}`;
+        const imageUrl = `${getImageBaseUrl()}${photo.file_path}`;
         showImagePreview(imageUrl, photo.original_filename, () => {
           setDownloading(prev => {
             const newDownloading = new Set(prev);
@@ -217,7 +217,7 @@ const PhotoGallery: React.FC<PhotoGalleryProps> = ({ photos, roomId, onPhotosUpd
       
       for (let i = 0; i < selectedPhotoObjects.length; i++) {
         const photo = selectedPhotoObjects[i];
-        const imageUrl = `${window.location.protocol}//${window.location.hostname}:8000${photo.file_path}`;
+        const imageUrl = `${getImageBaseUrl()}${photo.file_path}`;
         
         setTimeout(() => {
           const newWindow = window.open('', '_blank');
@@ -374,7 +374,7 @@ const PhotoGallery: React.FC<PhotoGalleryProps> = ({ photos, roomId, onPhotosUpd
     >
       <div style={{ position: 'relative' }}>
         <img
-          src={`${window.location.protocol}//${window.location.hostname}:8000${photo.thumbnail_path || photo.file_path}`}
+          src={`${getImageBaseUrl()}${photo.thumbnail_path || photo.file_path}`}
           alt={photo.original_filename}
           style={{ 
             width: '100%', 

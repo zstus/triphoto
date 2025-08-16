@@ -54,6 +54,11 @@ const getApiBaseUrl = () => {
 const API_BASE_URL = getApiBaseUrl();
 console.log('🔗 Final API Base URL:', API_BASE_URL);
 
+// 이미지 URL을 위한 base URL (API URL에서 /api 제거)
+export const getImageBaseUrl = (): string => {
+  return API_BASE_URL.replace('/api', '');
+};
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000, // 30 second timeout

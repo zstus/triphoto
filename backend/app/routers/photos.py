@@ -298,8 +298,10 @@ async def download_photo(request: Request, room_id: str, photo_id: str, db = Dep
     
     # Validate file path to prevent directory traversal
     try:
+        upload_base_dir = os.path.join(os.path.dirname(__file__), "..", "uploads")
+        room_upload_dir = os.path.join(upload_base_dir, validated_room_id)
         safe_path = FileSecurityUtils.sanitize_upload_path(
-            os.path.join(os.path.dirname(__file__), "..", "uploads"), 
+            room_upload_dir, 
             os.path.basename(file_path)
         )
         # Ensure the actual file path matches the sanitized path
