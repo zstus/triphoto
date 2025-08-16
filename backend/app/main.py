@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer
@@ -86,7 +86,27 @@ app.add_middleware(
 # Environment-based upload directory configuration
 uploads_dir = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "uploads"))
 os.makedirs(uploads_dir, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+
+# Static file serving with debugging
+try:
+    app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+    print(f"✅ Static files mounted: /uploads -> {uploads_dir}")
+except Exception as e:
+    print(f"❌ Failed to mount static files: {e}")
+
+# Additional static file route for debugging
+from fastapi.responses import FileResponse
+import os
+
+@app.get("/uploads/{room_id}/{filename}")
+async def serve_upload_file(room_id: str, filename: str):
+    """Direct file serving route for debugging"""
+    file_path = os.path.join(uploads_dir, room_id, filename)
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    else:
+        print(f"❌ File not found: {file_path}")
+        raise HTTPException(status_code=404, detail="File not found")
 
 @app.on_event("startup")
 async def startup():
