@@ -53,7 +53,7 @@ async def upload_photo(
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     
-    upload_dir = os.path.join(os.path.dirname(__file__), "..", "..", "uploads")
+    upload_dir = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
     
     try:
         file_data = await save_uploaded_file(file, upload_dir, validated_room_id)
