@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { roomApi } from '../services/api';
-import { RoomCreate } from '../types';
 import MobileLayout from '../components/MobileLayout';
 import { colors, spacing, shadows } from '../styles/responsive';
 
@@ -25,8 +24,35 @@ const CreateRoomPage: React.FC = () => {
     try {
       const formData = { name, description, creator_name };
       const room = await roomApi.createRoom(formData);
+      
+      // 방 생성자를 자동 로그인 처리
       localStorage.setItem('userName', creator_name);
-      navigate(`/room/${room.id}`);
+      sessionStorage.setItem('userName', creator_name);
+      
+      // 방별 사용자 이름도 미리 설정 (중요: 로그인 모달 스킵을 위해)
+      const roomUserData = JSON.parse(localStorage.getItem('roomUsers') || '{}');
+      roomUserData[room.id] = creator_name;
+      localStorage.setItem('roomUsers', JSON.stringify(roomUserData));
+      
+      // 방 생성자 자동 진입을 위한 임시 플래그 설정
+      const autoLoginFlag = `autoLogin_${room.id}`;
+      sessionStorage.setItem(autoLoginFlag, creator_name);
+      console.log('🔐 Auto-login flag set:', autoLoginFlag, '=', creator_name);
+      
+      // 백엔드에 방 참가자로 등록 (방 생성자 자동 참가)
+      try {
+        await roomApi.joinRoom(room.id, { user_name: creator_name });
+        console.log('✅ Room creator auto-joined successfully');
+      } catch (error) {
+        console.log('⚠️ Auto-join failed, but continuing (creator might already be joined):', error);
+      }
+      
+      console.log('🏠 Room creator auto-login setup completed for:', creator_name);
+      console.log('🆔 Room ID:', room.id);
+      console.log('🔍 Verifying sessionStorage flag:', sessionStorage.getItem(autoLoginFlag));
+      
+      // 생성자임을 표시하는 쿼리 파라미터와 함께 방으로 이동
+      navigate(`/room/${room.id}?creator=true`);
     } catch (error) {
       alert('방 생성에 실패했습니다.');
     } finally {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { roomApi, photoApi } from '../services/api';
-import { Room, Photo, Participant } from '../types';
+import { Room, Photo, Participant, RoomStatistics } from '../types';
 import PhotoUpload from '../components/PhotoUpload';
 import PhotoGallery from '../components/PhotoGallery';
 import MobileLayout from '../components/MobileLayout';
@@ -12,11 +12,17 @@ const RoomPage: React.FC = () => {
   console.log('🏠 RoomPage component mounted');
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   console.log('🆔 Room ID from params:', roomId);
+  
+  // 생성자 플래그 확인
+  const isCreator = searchParams.get('creator') === 'true';
+  console.log('👑 Is creator:', isCreator);
   
   const [room, setRoom] = useState<Room | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [roomStatistics, setRoomStatistics] = useState<RoomStatistics | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'gallery' | 'upload'>('gallery');
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -29,16 +35,18 @@ const RoomPage: React.FC = () => {
     if (roomId) {
       const userName = localStorage.getItem('userName');
       try {
-        const [roomData, photosData, participantsData] = await Promise.all([
+        const [roomData, photosData, participantsData, statisticsData] = await Promise.all([
           roomApi.getRoom(roomId),
           userName && userName.trim().length >= 2 
             ? photoApi.getRoomPhotosWithUserStatus(roomId, userName)
             : photoApi.getRoomPhotos(roomId),
-          roomApi.getParticipantsList(roomId)
+          roomApi.getParticipantsList(roomId),
+          roomApi.getRoomStatistics(roomId)
         ]);
         setRoom(roomData);
         setPhotos(photosData);
         setParticipants(participantsData.participants);
+        setRoomStatistics(statisticsData);
       } catch (error: any) {
         console.error('❌ Failed to refresh data:', error);
       }
@@ -50,16 +58,18 @@ const RoomPage: React.FC = () => {
     if (roomId) {
       const userName = localStorage.getItem('userName');
       try {
-        const [roomData, photosData, participantsData] = await Promise.all([
+        const [roomData, photosData, participantsData, statisticsData] = await Promise.all([
           roomApi.getRoom(roomId),
           userName && userName.trim().length >= 2 
             ? photoApi.getRoomPhotosWithUserStatus(roomId, userName)
             : photoApi.getRoomPhotos(roomId),
-          roomApi.getParticipantsList(roomId)
+          roomApi.getParticipantsList(roomId),
+          roomApi.getRoomStatistics(roomId)
         ]);
         setRoom(roomData);
         setPhotos(photosData);
         setParticipants(participantsData.participants);
+        setRoomStatistics(statisticsData);
         setActiveTab('gallery');
       } catch (error: any) {
         console.error('❌ Failed to refresh data after upload:', error);
@@ -67,20 +77,7 @@ const RoomPage: React.FC = () => {
     }
   }, [roomId]);
 
-  useEffect(() => {
-    console.log('🔥 useEffect triggered with roomId:', roomId);
-    if (!roomId) {
-      console.log('❌ No roomId in useEffect');
-      return;
-    }
-
-    // 링크 공유로 접근시 항상 로그인 모달 표시 (보안 강화)
-    console.log('🚪 Showing login modal for room access');
-    setShowLoginModal(true);
-    setLoading(false);
-  }, [roomId]); // roomId만 의존성으로 유지
-
-  const handleLogin = async (userName: string) => {
+  const handleLogin = useCallback(async (userName: string) => {
     console.log('🔑 handleLogin called with userName:', userName);
     console.log('🔑 Setting login modal to false and loading room data');
     setShowLoginModal(false);
@@ -96,12 +93,13 @@ const RoomPage: React.FC = () => {
       // 약간의 지연을 주어 백엔드에서 참가자 추가가 완료되도록 함
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      const [roomData, photosData, participantsData] = await Promise.all([
+      const [roomData, photosData, participantsData, statisticsData] = await Promise.all([
         roomApi.getRoom(roomId),
         userName && userName.trim().length >= 2 
           ? photoApi.getRoomPhotosWithUserStatus(roomId, userName)
           : photoApi.getRoomPhotos(roomId),
-        roomApi.getParticipantsList(roomId)
+        roomApi.getParticipantsList(roomId),
+        roomApi.getRoomStatistics(roomId)
       ]);
       
       console.log('✅ Room data loaded after login');
@@ -109,13 +107,59 @@ const RoomPage: React.FC = () => {
       setRoom(roomData);
       setPhotos(photosData);
       setParticipants(participantsData.participants);
+      setRoomStatistics(statisticsData);
     } catch (error: any) {
       console.error('❌ Failed to load room data after login:', error);
       alert('방 정보를 불러올 수 없습니다.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [roomId]);
+
+  useEffect(() => {
+    console.log('🔥 useEffect triggered with roomId:', roomId);
+    if (!roomId) {
+      console.log('❌ No roomId in useEffect');
+      return;
+    }
+
+    // 방 생성 직후 자동 진입 플래그 확인 (최우선)
+    const autoLoginName = sessionStorage.getItem(`autoLogin_${roomId}`);
+    console.log('🔍 Checking auto-login flag for room:', roomId, 'Found name:', autoLoginName);
+    
+    if (autoLoginName && autoLoginName.trim()) {
+      console.log('🚀 Auto-login flag detected - immediate room entry for:', autoLoginName);
+      sessionStorage.removeItem(`autoLogin_${roomId}`); // 플래그 제거
+      
+      // localStorage에도 사용자 정보 설정 (중복 로그인 방지)
+      localStorage.setItem('userName', autoLoginName);
+      const roomUserData = JSON.parse(localStorage.getItem('roomUsers') || '{}');
+      roomUserData[roomId] = autoLoginName;
+      localStorage.setItem('roomUsers', JSON.stringify(roomUserData));
+      
+      // 자동 로그인된 사용자로 방 데이터 로드
+      handleLogin(autoLoginName);
+      return;
+    }
+
+    // 기존 로그인 정보 확인 - 방별 로그인 기록만 확인 (globalName 제거)
+    const roomUserData = JSON.parse(localStorage.getItem('roomUsers') || '{}');
+    const roomSpecificName = roomUserData[roomId];
+    
+    console.log('🔍 Existing room login check - Room specific:', roomSpecificName, 'Is creator:', isCreator);
+    
+    // 해당 방에 로그인한 기록이 있는 경우에만 자동 로그인 (isCreator 제거)
+    if (roomSpecificName && roomSpecificName.trim()) {
+      console.log('✅ Found existing room login - loading room directly with:', roomSpecificName);
+      handleLogin(roomSpecificName);
+      return;
+    }
+
+    // 로그인 정보가 없는 경우 로그인 모달 표시
+    console.log('🚪 No room-specific login found - showing login modal');
+    setShowLoginModal(true);
+    setLoading(false);
+  }, [roomId, isCreator, navigate, handleLogin]);
 
   const handleParticipantClick = (participantName: string) => {
     if (selectedUploader === participantName) {
@@ -360,9 +404,11 @@ const RoomPage: React.FC = () => {
           borderRadius: '20px',
           fontSize: '12px',
           fontWeight: '600',
-          marginLeft: spacing.sm
+          marginLeft: spacing.sm,
+          textAlign: 'center',
+          minWidth: '60px'
         }}>
-          {selectedUploader ? filteredPhotos.length : photos.length}
+          {selectedUploader ? filteredPhotos.length : (roomStatistics?.visible_photos || photos.length)}
         </div>
       </div>
       
@@ -377,6 +423,86 @@ const RoomPage: React.FC = () => {
         <span>👤 {room.creator_name}</span>
         <span>{new Date(room.created_at).toLocaleDateString('ko-KR')}</span>
       </div>
+
+      {/* 상세 통계 정보 */}
+      {roomStatistics && (
+        <div style={{
+          backgroundColor: colors.light,
+          borderRadius: '12px',
+          padding: spacing.md,
+          marginBottom: spacing.md,
+          border: `1px solid ${colors.border}`
+        }}>
+          <div style={{
+            fontSize: '12px',
+            color: colors.textMuted,
+            marginBottom: spacing.sm,
+            fontWeight: '600'
+          }}>
+            📊 방 통계
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: spacing.sm,
+            fontSize: '11px'
+          }}>
+            <div style={{
+              textAlign: 'center',
+              padding: spacing.xs,
+              backgroundColor: colors.background,
+              borderRadius: '8px',
+              border: `1px solid ${colors.border}`
+            }}>
+              <div style={{ fontWeight: '600', color: colors.primary, fontSize: '14px' }}>
+                {roomStatistics.total_photos}
+              </div>
+              <div style={{ color: colors.textMuted, marginTop: '2px' }}>
+                전체 업로드
+              </div>
+            </div>
+            <div style={{
+              textAlign: 'center',
+              padding: spacing.xs,
+              backgroundColor: colors.background,
+              borderRadius: '8px',
+              border: `1px solid ${colors.border}`
+            }}>
+              <div style={{ fontWeight: '600', color: colors.success, fontSize: '14px' }}>
+                {roomStatistics.visible_photos}
+              </div>
+              <div style={{ color: colors.textMuted, marginTop: '2px' }}>
+                보이는 사진
+              </div>
+            </div>
+            <div style={{
+              textAlign: 'center',
+              padding: spacing.xs,
+              backgroundColor: colors.background,
+              borderRadius: '8px',
+              border: `1px solid ${colors.border}`
+            }}>
+              <div style={{ fontWeight: '600', color: colors.warning, fontSize: '14px' }}>
+                {roomStatistics.hidden_photos}
+              </div>
+              <div style={{ color: colors.textMuted, marginTop: '2px' }}>
+                숨겨진 사진
+              </div>
+            </div>
+          </div>
+          {roomStatistics.hidden_photos > 0 && (
+            <div style={{
+              fontSize: '10px',
+              color: colors.textMuted,
+              textAlign: 'center',
+              marginTop: spacing.xs,
+              fontStyle: 'italic'
+            }}>
+              💡 싫어요가 많은 사진은 자동으로 숨겨집니다
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 참가자 태그들 */}
       {participants.length > 0 && (
@@ -662,7 +788,7 @@ const RoomPage: React.FC = () => {
           transition: 'all 0.2s ease'
         }}
       >
-        📷 갤러리 ({selectedUploader ? filteredPhotos.length : photos.length})
+        📷 갤러리 ({selectedUploader ? filteredPhotos.length : (roomStatistics?.visible_photos || photos.length)})
       </button>
       <button
         onClick={() => setActiveTab('upload')}

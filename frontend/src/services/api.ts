@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Room, Photo, Like, Dislike, RoomCreate, RoomJoin, LikeCreate, DislikeCreate, Participant } from '../types';
+import { Room, Photo, Like, Dislike, RoomCreate, RoomJoin, LikeCreate, DislikeCreate, Participant, UploadSession, UploadSessionCreate, UploadLog, UploadLogCreate, UploadResult, RoomStatistics, RetryRequest } from '../types';
 
 // CSRF Token management
 let csrfToken: string | null = null;
@@ -224,6 +224,15 @@ export const roomApi = {
     const response = await api.delete(`/rooms/${roomId}`);
     return response.data;
   },
+
+  getRoomStatistics: async (roomId: string): Promise<RoomStatistics> => {
+    if (!validateInput.roomId(roomId)) {
+      throw new Error('Invalid room ID format');
+    }
+    
+    const response = await api.get(`/rooms/${roomId}/statistics`);
+    return response.data;
+  },
 };
 
 // Input validation helpers
@@ -432,6 +441,127 @@ export const dislikeApi = {
     }
     
     const response = await api.get(`/dislikes/${photoId}/check/${encodeURIComponent(userName)}`);
+    return response.data;
+  },
+};
+
+// 업로드 세션 API
+export const uploadSessionApi = {
+  createSession: async (sessionData: UploadSessionCreate): Promise<UploadSession> => {
+    if (!validateInput.roomId(sessionData.room_id)) {
+      throw new Error('Invalid room ID format');
+    }
+    
+    if (!validateInput.userName(sessionData.user_name)) {
+      throw new Error('Invalid username');
+    }
+    
+    const sanitizedData = {
+      ...sessionData,
+      user_name: sanitizeInput(sessionData.user_name)
+    };
+    
+    const response = await api.post('/upload-logs/sessions/', sanitizedData);
+    return response.data;
+  },
+
+  getSession: async (sessionId: string): Promise<UploadSession> => {
+    if (!validateInput.roomId(sessionId)) { // Sessions use UUID format
+      throw new Error('Invalid session ID format');
+    }
+    
+    const response = await api.get(`/upload-logs/sessions/${sessionId}`);
+    return response.data;
+  },
+
+  updateSession: async (sessionId: string, updateData: Partial<UploadSession>): Promise<UploadSession> => {
+    if (!validateInput.roomId(sessionId)) {
+      throw new Error('Invalid session ID format');
+    }
+    
+    const response = await api.put(`/upload-logs/sessions/${sessionId}`, updateData);
+    return response.data;
+  },
+};
+
+// 업로드 로그 API
+export const uploadLogApi = {
+  createLog: async (logData: UploadLogCreate): Promise<UploadLog> => {
+    if (!validateInput.roomId(logData.session_id)) {
+      throw new Error('Invalid session ID format');
+    }
+    
+    if (!validateInput.roomId(logData.room_id)) {
+      throw new Error('Invalid room ID format');
+    }
+    
+    if (!validateInput.userName(logData.uploader_name)) {
+      throw new Error('Invalid username');
+    }
+    
+    const sanitizedData = {
+      ...logData,
+      uploader_name: sanitizeInput(logData.uploader_name)
+    };
+    
+    const response = await api.post('/upload-logs/logs/', sanitizedData);
+    return response.data;
+  },
+
+  updateLog: async (logId: string, updateData: Partial<UploadLog>): Promise<UploadLog> => {
+    if (!validateInput.roomId(logId)) {
+      throw new Error('Invalid log ID format');
+    }
+    
+    const response = await api.put(`/upload-logs/logs/${logId}`, updateData);
+    return response.data;
+  },
+
+  getSessionLogs: async (sessionId: string): Promise<UploadLog[]> => {
+    if (!validateInput.roomId(sessionId)) {
+      throw new Error('Invalid session ID format');
+    }
+    
+    const response = await api.get(`/upload-logs/sessions/${sessionId}/logs`);
+    return response.data;
+  },
+
+  retryFailedUploads: async (retryData: RetryRequest): Promise<UploadResult> => {
+    const response = await api.post('/upload-logs/retry', retryData);
+    return response.data;
+  },
+};
+
+// photoApi에 로그 ID를 포함한 업로드 함수 추가
+export const photoApiEnhanced = {
+  uploadPhotoWithLogging: async (roomId: string, file: File, uploaderName: string, logId?: string): Promise<Photo> => {
+    // 입력 검증
+    if (!validateInput.roomId(roomId)) {
+      throw new Error('Invalid room ID format');
+    }
+    
+    if (!validateInput.userName(uploaderName)) {
+      throw new Error('Invalid username');
+    }
+    
+    const fileValidation = validateInput.file(file);
+    if (!fileValidation.valid) {
+      throw new Error(fileValidation.error || 'Invalid file');
+    }
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('uploader_name', sanitizeInput(uploaderName));
+    
+    if (logId) {
+      formData.append('log_id', logId);
+    }
+
+    const response = await api.post(`/photos/${roomId}/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
     return response.data;
   },
 };

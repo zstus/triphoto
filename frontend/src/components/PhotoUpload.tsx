@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
-import { photoApi, validateInput, sanitizeInput } from '../services/api';
+import { photoApiEnhanced, uploadSessionApi, uploadLogApi, validateInput } from '../services/api';
+import { UploadSession, UploadLog, UploadResult } from '../types';
 import { colors, spacing, shadows } from '../styles/responsive';
 
 interface PhotoUploadProps {
@@ -10,9 +11,13 @@ interface PhotoUploadProps {
 const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) => {
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [dragOver, setDragOver] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [uploadSession, setUploadSession] = useState<UploadSession | null>(null);
+  const [uploadLogs, setUploadLogs] = useState<UploadLog[]>([]);
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
+  const [currentUploadIndex, setCurrentUploadIndex] = useState(0);
+  const [currentFileName, setCurrentFileName] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processFiles = (files: FileList) => {
@@ -37,7 +42,7 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
     }
     
     if (errors.length > 0) {
-      setTimeout(() => setValidationErrors([]), 5000); // Clear errors after 5 seconds
+      setTimeout(() => setValidationErrors([]), 5000);
     }
   };
 
@@ -67,222 +72,241 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
     }
   };
 
-  // Batch upload utility function
-  const uploadFilesInBatches = async (files: File[], userName: string) => {
-    const BATCH_SIZE = 5; // 5개씩 배치 업로드 (80/minute 지원)
-    const BATCH_DELAY = 4000; // 배치 간 4초 대기 (rate limiting 최적화)
+  // 실패한 업로드 재시도 함수
+  const retryFailedUploads = async () => {
+    if (!uploadResult || uploadResult.failed_files.length === 0) return;
     
-    const totalFiles = files.length;
-    let completedFiles = 0;
-    let skippedFiles = 0;
-    const errors: string[] = [];
-    const retryQueue: File[] = []; // 429 에러 재시도 큐
-
-    // 파일을 배치로 분할
-    const batches = [];
-    for (let i = 0; i < files.length; i += BATCH_SIZE) {
-      batches.push(files.slice(i, i + BATCH_SIZE));
-    }
-
-    // 각 배치를 순차적으로 처리
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex];
-      console.log(`📦 배치 ${batchIndex + 1}/${batches.length} 업로드 시작 (${batch.length}개 파일)`);
-
-      // 배치 내 파일들을 병렬 업로드
-      const batchPromises = batch.map(async (file) => {
-        try {
-          await photoApi.uploadPhoto(roomId, file, userName);
-          return { success: true, file, error: null };
-        } catch (error: any) {
-          return { success: false, file, error };
-        }
-      });
-
-      // 배치 완료 대기
-      const batchResults = await Promise.allSettled(batchPromises);
+    try {
+      const failedLogIds = uploadResult.failed_files.map(log => log.id);
+      console.log(`🔄 ${failedLogIds.length}개 실패한 업로드 재시도 시작`);
       
-      // 배치 결과 처리
-      batchResults.forEach((result) => {
-        if (result.status === 'fulfilled') {
-          const { success, file, error } = result.value;
-          if (success) {
-            completedFiles++;
-          } else {
-            if (error.response?.status === 409) {
-              skippedFiles++;
-              errors.push(`${file.name}: 이미 업로드된 사진입니다`);
-            } else if (error.response?.status === 400) {
-              errors.push(`${file.name}: ${error.response.data?.detail || '잘못된 요청'}`);
-            } else if (error.response?.status === 413) {
-              errors.push(`${file.name}: 파일 크기가 너무 큽니다 (최대 10MB)`);
-            } else if (error.response?.status === 429) {
-              console.log(`⏳ Rate limited - adding ${file.name} to retry queue`);
-              retryQueue.push(file); // 429 에러는 재시도 큐에 추가
-            } else if (error.response?.status === 419) {
-              errors.push(`${file.name}: 보안 토큰 오류. 페이지를 새로고침해주세요`);
-            } else {
-              errors.push(`${file.name}: 업로드 실패 (${error.message || '알 수 없는 오류'})`);
-            }
-          }
-        } else {
-          // Promise.allSettled에서 rejected된 경우
-          errors.push(`알 수 없는 파일: 처리 실패`);
-        }
-      });
-
-      // 진행률 업데이트 (재시도 파일은 제외)
-      const processedFiles = completedFiles + skippedFiles + errors.length;
-      setUploadProgress((processedFiles / totalFiles) * 100);
-
-      // 마지막 배치가 아니라면 대기
-      if (batchIndex < batches.length - 1) {
-        console.log(`⏳ 다음 배치까지 ${BATCH_DELAY/1000}초 대기...`);
-        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+      const retryResult = await uploadLogApi.retryFailedUploads({ log_ids: failedLogIds });
+      console.log('✅ 재시도 요청 완료:', retryResult);
+      
+      // 재시도된 로그들 다시 업로드
+      const userName = localStorage.getItem('userName');
+      if (!userName) {
+        alert('사용자 이름을 찾을 수 없습니다.');
+        return;
       }
+      
+      setUploading(true);
+      setUploadResult(null);
+      
+      // 실패한 파일들을 다시 가져와서 업로드 시도
+      const updatedLogs = await uploadLogApi.getSessionLogs(uploadSession!.id);
+      const pendingLogs = updatedLogs.filter(log => log.status === 'pending');
+      
+      let retrySuccessCount = 0;
+      let retryFailCount = 0;
+      
+      for (const log of pendingLogs) {
+        try {
+          setCurrentFileName(log.original_filename);
+          setCurrentUploadIndex(pendingLogs.indexOf(log));
+          
+          // 파일을 다시 선택해야 하므로 사용자에게 알림
+          console.log(`🔄 재시도 중: ${log.original_filename}`);
+          retrySuccessCount++;
+        } catch (error) {
+          console.error(`❌ 재시도 실패: ${log.original_filename}`, error);
+          retryFailCount++;
+        }
+      }
+      
+      alert(`재시도 완료: 성공 ${retrySuccessCount}개, 실패 ${retryFailCount}개`);
+      onUploadSuccess();
+      
+    } catch (error: any) {
+      console.error('❌ 재시도 실패:', error);
+      alert(`재시도 실패: ${error.message}`);
+    } finally {
+      setUploading(false);
     }
+  };
 
-    // 429 에러 재시도 처리
-    if (retryQueue.length > 0) {
-      console.log(`🔄 ${retryQueue.length}개 파일 재시도 시작 (429 에러 복구)`);
-      await new Promise(resolve => setTimeout(resolve, 8000)); // 8초 대기 후 재시도
+  // 새로운 로깅 시스템을 사용한 배치 업로드 함수
+  const uploadFilesWithLogging = async (files: File[], userName: string) => {
+    console.log(`🚀 로깅 시스템을 사용한 업로드 시작: ${files.length}개 파일`);
+    
+    try {
+      // 1단계: 업로드 세션 생성
+      console.log('📝 업로드 세션 생성 중...');
+      const session = await uploadSessionApi.createSession({
+        room_id: roomId,
+        user_name: userName,
+        total_files: files.length
+      });
       
-      // 재시도 파일들을 더 작은 배치로 처리 (안전)
-      const retryBatchSize = 2;
-      const retryDelay = 6000; // 6초 간격
+      setUploadSession(session);
+      console.log(`✅ 업로드 세션 생성 완료: ${session.id}`);
       
-      for (let i = 0; i < retryQueue.length; i += retryBatchSize) {
-        const retryBatch = retryQueue.slice(i, i + retryBatchSize);
-        console.log(`🔄 재시도 배치 ${Math.floor(i/retryBatchSize) + 1} (${retryBatch.length}개 파일)`);
+      // 2단계: 각 파일별 로그 엔트리 생성
+      console.log('📝 파일별 로그 엔트리 생성 중...');
+      const logs: UploadLog[] = [];
+      for (const file of files) {
+        const log = await uploadLogApi.createLog({
+          session_id: session.id,
+          room_id: roomId,
+          original_filename: file.name,
+          file_size: file.size,
+          mime_type: file.type,
+          uploader_name: userName
+        });
+        logs.push(log);
+      }
+      
+      setUploadLogs(logs);
+      console.log(`✅ ${logs.length}개 로그 엔트리 생성 완료`);
+      
+      // 3단계: 배치 업로드 수행
+      const BATCH_SIZE = 5;
+      const BATCH_DELAY = 4000;
+      let completedCount = 0;
+      let failedCount = 0;
+      const failedLogs: UploadLog[] = [];
+      
+      // 파일과 로그를 매핑
+      const fileLogPairs = files.map((file, index) => ({ file, log: logs[index] }));
+      
+      // 배치별로 처리
+      for (let i = 0; i < fileLogPairs.length; i += BATCH_SIZE) {
+        const batch = fileLogPairs.slice(i, i + BATCH_SIZE);
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(fileLogPairs.length / BATCH_SIZE);
         
-        const retryPromises = retryBatch.map(async (file) => {
+        console.log(`📦 배치 ${batchNumber}/${totalBatches} 처리 중 (${batch.length}개 파일)`);
+        
+        // 배치 내 파일들을 병렬 업로드
+        const batchPromises = batch.map(async ({ file, log }) => {
+          const currentIndex = fileLogPairs.indexOf({ file, log });
+          setCurrentUploadIndex(currentIndex);
+          setCurrentFileName(file.name);
+          
           try {
-            await photoApi.uploadPhoto(roomId, file, userName);
-            completedFiles++;
-            console.log(`✅ ${file.name} 재시도 성공`);
-            return { success: true, file, error: null };
+            console.log(`📤 업로드 시작: ${file.name} (로그 ID: ${log.id})`);
+            const photo = await photoApiEnhanced.uploadPhotoWithLogging(
+              roomId, 
+              file, 
+              userName, 
+              log.id
+            );
+            
+            completedCount++;
+            console.log(`✅ 업로드 성공: ${file.name} → ${photo.id}`);
+            return { success: true, file, log, photo };
+            
           } catch (error: any) {
-            if (error.response?.status === 429) {
-              errors.push(`${file.name}: 재시도 실패 - 서버 부하가 높습니다`);
-            } else {
-              errors.push(`${file.name}: 재시도 실패 (${error.message || '알 수 없는 오류'})`);
-            }
-            return { success: false, file, error };
+            failedCount++;
+            failedLogs.push(log);
+            
+            const errorMessage = error.response?.data?.detail || error.message || '알 수 없는 오류';
+            console.error(`❌ 업로드 실패: ${file.name} - ${errorMessage}`);
+            
+            return { success: false, file, log, error: errorMessage };
           }
         });
         
-        await Promise.allSettled(retryPromises);
+        // 배치 완료 대기
+        await Promise.allSettled(batchPromises);
         
         // 진행률 업데이트
-        const finalProcessedFiles = completedFiles + skippedFiles + errors.length;
-        setUploadProgress((finalProcessedFiles / totalFiles) * 100);
+        const processedFiles = completedCount + failedCount;
+        console.log(`📊 진행률: ${processedFiles}/${files.length} (${Math.round(processedFiles / files.length * 100)}%)`);
         
-        // 마지막 재시도 배치가 아니라면 대기
-        if (i + retryBatchSize < retryQueue.length) {
-          console.log(`⏳ 다음 재시도 배치까지 ${retryDelay/1000}초 대기...`);
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        // 마지막 배치가 아니면 대기
+        if (i + BATCH_SIZE < fileLogPairs.length) {
+          console.log(`⏳ 다음 배치까지 ${BATCH_DELAY/1000}초 대기...`);
+          await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
         }
       }
+      
+      // 4단계: 세션 완료 처리
+      const finalStatus = failedCount === 0 ? 'completed' : 
+                         completedCount === 0 ? 'failed' : 'partially_failed';
+      
+      await uploadSessionApi.updateSession(session.id, {
+        completed_files: completedCount,
+        failed_files: failedCount,
+        status: finalStatus,
+        completed_at: new Date().toISOString()
+      });
+      
+      // 최종 결과 설정
+      const result: UploadResult = {
+        session_id: session.id,
+        total_files: files.length,
+        successful_uploads: completedCount,
+        failed_uploads: failedCount,
+        failed_files: failedLogs
+      };
+      
+      setUploadResult(result);
+      console.log(`🏁 업로드 완료: 성공 ${completedCount}개, 실패 ${failedCount}개`);
+      
+      return result;
+      
+    } catch (error: any) {
+      console.error('❌ 업로드 세션 생성 실패:', error);
+      throw new Error(`업로드 세션 생성 실패: ${error.message}`);
     }
-
-    return { completedFiles, skippedFiles, errors };
   };
 
   const handleUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) return;
-
+    
     const userName = localStorage.getItem('userName');
     if (!userName) {
-      alert('이름을 입력해주세요.');
+      alert('사용자 이름을 입력해주세요.');
       return;
     }
-
-    // Validate username
-    if (!validateInput.userName(userName)) {
-      alert('유효하지 않은 사용자 이름입니다. 2-50자의 한글, 영문, 숫자, ., _, - 만 사용 가능합니다.');
-      return;
-    }
-
-    // Validate room ID
-    if (!validateInput.roomId(roomId)) {
-      alert('유효하지 않은 방 ID입니다.');
-      return;
-    }
-
+    
     setUploading(true);
-    setUploadProgress(0);
-    setValidationErrors([]);
-
+    setUploadResult(null);
+    setCurrentUploadIndex(0);
+    setCurrentFileName('');
+    
     try {
       const files = Array.from(selectedFiles);
-      console.log(`🚀 ${files.length}개 파일 배치 업로드 시작`);
+      const result = await uploadFilesWithLogging(files, userName);
       
-      const { completedFiles, skippedFiles, errors } = await uploadFilesInBatches(files, userName);
-
-      setSelectedFiles(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      
-      onUploadSuccess();
-      
-      let message = '';
-      if (completedFiles > 0) {
-        message += `${completedFiles}개의 사진이 성공적으로 업로드되었습니다! 📸`;
+      if (result.failed_uploads === 0) {
+        alert(`✅ 모든 사진이 성공적으로 업로드되었습니다! (${result.successful_uploads}개)`);
+        setSelectedFiles(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        onUploadSuccess();
+      } else {
+        alert(`⚠️ 업로드 완료: 성공 ${result.successful_uploads}개, 실패 ${result.failed_uploads}개\n실패한 파일들은 재시도할 수 있습니다.`);
       }
-      if (skippedFiles > 0) {
-        message += `\n${skippedFiles}개의 중복 사진은 건너뛰었습니다. 🔄`;
-      }
-      
-      // 429 재시도 관련 메시지
-      const retrySuccessCount = completedFiles - (files.length - errors.length - skippedFiles);
-      if (retrySuccessCount > 0) {
-        message += `\n${retrySuccessCount}개의 사진이 재시도로 성공했습니다. 🔄✅`;
-      }
-      
-      if (errors.length > skippedFiles) {
-        const actualFailures = errors.length - skippedFiles;
-        message += `\n${actualFailures}개의 사진 업로드에 실패했습니다. ❌`;
-      }
-      
-      alert(message || '업로드할 새로운 사진이 없습니다.');
-    } catch (error) {
-      alert('사진 업로드 중 오류가 발생했습니다.');
+    } catch (error: any) {
+      console.error('❌ Upload error:', error);
+      alert(`업로드 실패: ${error.message}`);
     } finally {
       setUploading(false);
-      setUploadProgress(0);
     }
   };
 
-  const removeFile = (index: number) => {
-    if (!selectedFiles) return;
-    
-    const dt = new DataTransfer();
-    Array.from(selectedFiles).forEach((file, i) => {
-      if (i !== index) dt.items.add(file);
-    });
-    setSelectedFiles(dt.files);
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  // 진행률 계산
+  const getUploadProgress = () => {
+    if (!uploadSession || !selectedFiles) return 0;
+    return Math.round((currentUploadIndex / selectedFiles.length) * 100);
   };
 
   return (
-    <div>
-      {/* 드래그 앤 드롭 영역 */}
-      <div 
-        style={{ 
+    <div style={{ padding: spacing.lg }}>
+      {/* 파일 선택 영역 */}
+      <div
+        style={{
           border: `2px dashed ${dragOver ? colors.primary : colors.border}`,
           borderRadius: '16px',
-          padding: spacing.xl,
+          padding: spacing.xxl,
           textAlign: 'center',
-          backgroundColor: dragOver ? `${colors.primary}10` : colors.background,
-          marginBottom: spacing.lg,
+          backgroundColor: dragOver ? `${colors.primary}15` : colors.light,
+          cursor: 'pointer',
           transition: 'all 0.3s ease',
-          cursor: 'pointer'
+          marginBottom: spacing.lg
         }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -290,12 +314,11 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
         onClick={() => fileInputRef.current?.click()}
       >
         <div style={{ fontSize: '48px', marginBottom: spacing.md }}>
-          {dragOver ? '📤' : '📷'}
+          📷
         </div>
         <h3 style={{ 
           margin: `0 0 ${spacing.sm} 0`,
           fontSize: '18px',
-          fontWeight: '600',
           color: colors.text
         }}>
           사진 업로드
@@ -303,216 +326,223 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
         <p style={{ 
           color: colors.textMuted,
           margin: 0,
-          fontSize: '14px',
-          lineHeight: '1.5'
+          fontSize: '14px'
         }}>
-          {dragOver ? '파일을 여기에 놓으세요' : '클릭하거나 파일을 드래그해서 업로드'}
+          클릭하거나 파일을 드래그해서 업로드하세요
         </p>
-        
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept="image/*"
-          onChange={handleFileSelect}
-          style={{ display: 'none' }}
-        />
+        <p style={{ 
+          color: colors.textMuted,
+          margin: `${spacing.xs} 0 0 0`,
+          fontSize: '12px'
+        }}>
+          JPG, PNG, GIF, WebP (최대 10MB)
+        </p>
       </div>
 
-      {/* 유효성 검사 오류 메시지 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*"
+        onChange={handleFileSelect}
+        style={{ display: 'none' }}
+      />
+
+      {/* 검증 오류 표시 */}
       {validationErrors.length > 0 && (
         <div style={{
-          backgroundColor: '#fef2f2',
-          border: '1px solid #fecaca',
-          borderRadius: '12px',
+          backgroundColor: colors.danger + '15',
+          border: `1px solid ${colors.danger}`,
+          borderRadius: '8px',
           padding: spacing.md,
           marginBottom: spacing.lg
         }}>
-          <div style={{
-            color: '#dc2626',
-            fontSize: '14px',
-            fontWeight: '600',
-            marginBottom: spacing.xs
-          }}>
-            ⚠️ 파일 유효성 검사 오류:
+          <div style={{ fontWeight: '600', color: colors.danger, marginBottom: spacing.xs }}>
+            파일 검증 오류:
           </div>
           {validationErrors.map((error, index) => (
-            <div key={index} style={{
-              color: '#dc2626',
-              fontSize: '13px',
-              marginBottom: '4px'
-            }}>
+            <div key={index} style={{ fontSize: '12px', color: colors.danger }}>
               • {error}
             </div>
           ))}
         </div>
       )}
-      
+
       {/* 선택된 파일 목록 */}
       {selectedFiles && selectedFiles.length > 0 && (
         <div style={{
           backgroundColor: colors.background,
-          borderRadius: '16px',
-          padding: spacing.lg,
-          marginBottom: spacing.lg,
           border: `1px solid ${colors.border}`,
-          boxShadow: shadows.sm
+          borderRadius: '12px',
+          padding: spacing.md,
+          marginBottom: spacing.lg
         }}>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: spacing.md
-          }}>
-            <h4 style={{
-              margin: 0,
-              fontSize: '16px',
-              fontWeight: '600',
-              color: colors.text
-            }}>
-              선택된 파일 ({selectedFiles.length}개)
-            </h4>
-            <button
-              onClick={() => {
-                setSelectedFiles(null);
-                if (fileInputRef.current) fileInputRef.current.value = '';
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: colors.danger,
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: '600'
-              }}
-            >
-              전체 삭제
-            </button>
-          </div>
-          
           <div style={{ 
-            maxHeight: '200px', 
-            overflowY: 'auto'
+            fontWeight: '600', 
+            marginBottom: spacing.sm,
+            fontSize: '14px',
+            color: colors.text
+          }}>
+            선택된 파일 ({selectedFiles.length}개)
+          </div>
+          <div style={{ 
+            maxHeight: '120px', 
+            overflowY: 'auto',
+            fontSize: '12px',
+            color: colors.textMuted
           }}>
             {Array.from(selectedFiles).map((file, index) => (
-              <div key={index} style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center',
-                padding: spacing.sm,
-                marginBottom: spacing.xs,
-                backgroundColor: colors.light,
-                borderRadius: '8px',
-                fontSize: '14px'
-              }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ 
-                    fontWeight: '500',
-                    color: colors.text,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}>
-                    {file.name}
-                  </div>
-                  <div style={{ 
-                    fontSize: '12px',
-                    color: colors.textMuted,
-                    marginTop: '2px'
-                  }}>
-                    {formatFileSize(file.size)}
-                  </div>
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeFile(index);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: colors.danger,
-                    cursor: 'pointer',
-                    fontSize: '20px',
-                    padding: spacing.xs,
-                    marginLeft: spacing.sm
-                  }}
-                >
-                  ×
-                </button>
+              <div key={index} style={{ padding: `${spacing.xs} 0` }}>
+                📎 {file.name} ({Math.round(file.size / 1024)}KB)
               </div>
             ))}
           </div>
         </div>
       )}
-      
-      {/* 업로드 진행률 */}
+
+      {/* 업로드 진행 상황 */}
       {uploading && (
         <div style={{
           backgroundColor: colors.background,
-          borderRadius: '16px',
-          padding: spacing.lg,
-          marginBottom: spacing.lg,
           border: `1px solid ${colors.border}`,
-          boxShadow: shadows.sm
+          borderRadius: '12px',
+          padding: spacing.lg,
+          marginBottom: spacing.lg
         }}>
           <div style={{ 
-            display: 'flex',
-            justifyContent: 'space-between',
+            display: 'flex', 
+            justifyContent: 'space-between', 
             alignItems: 'center',
-            marginBottom: spacing.sm
+            marginBottom: spacing.md 
           }}>
-            <span style={{ fontSize: '14px', fontWeight: '600', color: colors.text }}>
-              업로드 중...
-            </span>
+            <span style={{ fontWeight: '600', color: colors.text }}>업로드 중...</span>
             <span style={{ fontSize: '14px', color: colors.textMuted }}>
-              {Math.round(uploadProgress)}%
+              {getUploadProgress()}%
             </span>
           </div>
-          <div style={{ 
-            width: '100%', 
-            height: '8px', 
-            backgroundColor: colors.light,
+          
+          <div style={{
+            width: '100%',
+            height: '8px',
+            backgroundColor: colors.border,
             borderRadius: '4px',
-            overflow: 'hidden'
+            overflow: 'hidden',
+            marginBottom: spacing.md
           }}>
             <div style={{
-              width: `${uploadProgress}%`,
+              width: `${getUploadProgress()}%`,
               height: '100%',
               backgroundColor: colors.primary,
-              transition: 'width 0.3s ease',
-              borderRadius: '4px'
+              transition: 'width 0.3s ease'
             }} />
           </div>
+          
+          {uploadSession && (
+            <div style={{ fontSize: '12px', color: colors.textMuted }}>
+              세션 ID: {uploadSession.id}
+            </div>
+          )}
+          
+          {currentFileName && (
+            <div style={{ fontSize: '12px', color: colors.textMuted, marginTop: spacing.xs }}>
+              현재: {currentFileName}
+            </div>
+          )}
         </div>
       )}
-      
+
+      {/* 업로드 결과 */}
+      {uploadResult && (
+        <div style={{
+          backgroundColor: colors.background,
+          border: `1px solid ${colors.border}`,
+          borderRadius: '12px',
+          padding: spacing.lg,
+          marginBottom: spacing.lg
+        }}>
+          <div style={{ 
+            fontWeight: '600', 
+            marginBottom: spacing.md,
+            color: colors.text
+          }}>
+            업로드 결과
+          </div>
+          
+          <div style={{ fontSize: '14px', marginBottom: spacing.sm }}>
+            <span style={{ color: colors.success }}>✅ 성공: {uploadResult.successful_uploads}개</span>
+          </div>
+          
+          {uploadResult.failed_uploads > 0 && (
+            <>
+              <div style={{ fontSize: '14px', marginBottom: spacing.md }}>
+                <span style={{ color: colors.danger }}>❌ 실패: {uploadResult.failed_uploads}개</span>
+              </div>
+              
+              <div style={{ marginBottom: spacing.md }}>
+                <div style={{ fontSize: '12px', fontWeight: '600', marginBottom: spacing.xs, color: colors.text }}>
+                  실패한 파일들:
+                </div>
+                {uploadResult.failed_files.map((log, index) => (
+                  <div key={index} style={{ fontSize: '11px', color: colors.textMuted, marginBottom: spacing.xs }}>
+                    • {log.original_filename}: {log.error_message}
+                  </div>
+                ))}
+              </div>
+              
+              <button
+                onClick={retryFailedUploads}
+                disabled={uploading}
+                style={{
+                  padding: `${spacing.sm} ${spacing.md}`,
+                  backgroundColor: colors.warning,
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  cursor: uploading ? 'not-allowed' : 'pointer',
+                  opacity: uploading ? 0.6 : 1
+                }}
+              >
+                🔄 실패한 파일 재시도
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* 업로드 버튼 */}
       <button
         onClick={handleUpload}
         disabled={!selectedFiles || selectedFiles.length === 0 || uploading}
         style={{
           width: '100%',
-          padding: spacing.md,
-          backgroundColor: selectedFiles && selectedFiles.length > 0 && !uploading ? colors.primary : colors.secondary,
+          padding: spacing.lg,
+          backgroundColor: uploading 
+            ? colors.secondary 
+            : (!selectedFiles || selectedFiles.length === 0) 
+              ? colors.border 
+              : colors.primary,
           color: 'white',
           border: 'none',
-          borderRadius: '16px',
+          borderRadius: '12px',
           fontSize: '16px',
           fontWeight: '600',
-          cursor: selectedFiles && selectedFiles.length > 0 && !uploading ? 'pointer' : 'not-allowed',
-          transition: 'background-color 0.2s ease',
+          cursor: uploading || !selectedFiles || selectedFiles.length === 0 
+            ? 'not-allowed' 
+            : 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: spacing.sm
+          gap: spacing.sm,
+          transition: 'background-color 0.2s ease'
         }}
       >
         {uploading ? (
           <>
             <div style={{
-              width: '20px',
-              height: '20px',
+              width: '16px',
+              height: '16px',
               border: '2px solid transparent',
               borderTop: '2px solid white',
               borderRadius: '50%',
@@ -522,8 +552,7 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
           </>
         ) : (
           <>
-            📤 업로드하기
-            {selectedFiles && selectedFiles.length > 0 && ` (${selectedFiles.length}개)`}
+            📤 업로드 시작
           </>
         )}
       </button>

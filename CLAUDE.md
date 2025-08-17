@@ -70,6 +70,8 @@ npm run dev
 - **Thumbnail generation**: Automatic thumbnail creation for gallery performance
 - **Multi-user concurrency**: Database transactions and async processing
 - **File validation**: Images only, content-type checking
+- **Auto-login for creators**: Room creators automatically login after creation without login modal
+- **Participant tracking**: Separate participant system tracks all room members, not just photo uploaders
 
 ### API Structure
 ```
@@ -216,3 +218,26 @@ The frontend API client (`services/api.ts`) automatically determines the correct
 - TypeScript strict mode enabled
 - Components are mobile-responsive (see `MobileLayout.tsx`)
 - API calls use async/await pattern with proper error handling
+
+### Auto-Login Flow for Room Creators
+When a user creates a new room, they are automatically logged in without seeing the login modal:
+
+**CreateRoomPage Process**:
+1. User fills out room creation form with their name
+2. Room creation API call creates room and adds creator as first participant
+3. Creator name is saved to both global and room-specific localStorage
+4. Navigation to room page includes `?creator=true` parameter
+
+**RoomPage Auto-Login Logic**:
+1. Detects `creator=true` parameter from URL
+2. Checks if room-specific username exists in localStorage
+3. If valid, automatically calls `handleLogin()` with creator name
+4. Removes `creator` parameter from URL for clean navigation
+5. Falls back to login modal if auto-login setup fails
+
+**Storage Strategy**:
+- `localStorage.userName`: Global username across all rooms
+- `localStorage.roomUsers`: Object mapping room IDs to usernames
+- `sessionStorage.userName`: Session-specific backup
+
+This eliminates the friction of room creators having to login immediately after creating their room.
