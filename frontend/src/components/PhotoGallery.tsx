@@ -383,6 +383,15 @@ const PhotoGallery: React.FC<PhotoGalleryProps> = ({ photos, roomId, onPhotosUpd
             cursor: 'pointer'
           }}
           onClick={() => handlePhotoSelect(photo.id)}
+          onLoad={() => console.log(`✅ Image loaded successfully: ${getImageBaseUrl()}${photo.thumbnail_path || photo.file_path}`)}
+          onError={(e) => {
+            const fullUrl = `${getImageBaseUrl()}${photo.thumbnail_path || photo.file_path}`;
+            console.error(`❌ Image failed to load: ${fullUrl}`);
+            console.error(`🔍 Base URL: ${getImageBaseUrl()}`);
+            console.error(`🔍 Photo path: ${photo.thumbnail_path || photo.file_path}`);
+            console.error(`🔍 Full URL: ${fullUrl}`);
+            console.error(`🔍 Photo object:`, photo);
+          }}
         />
         
         {/* 선택 표시 */}

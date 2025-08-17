@@ -49,8 +49,8 @@ server {
     }
 
     # 업로드된 파일 서빙 (FastAPI를 통해) - 단일 포트 최적화
-    location ~ ^/(uploads)/ {
-        proxy_pass http://127.0.0.1:8000;
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:8000/uploads/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
