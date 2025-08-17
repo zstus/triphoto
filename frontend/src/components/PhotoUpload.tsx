@@ -11,6 +11,7 @@ interface PhotoUploadProps {
 const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) => {
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [dragOver, setDragOver] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [uploadSession, setUploadSession] = useState<UploadSession | null>(null);
@@ -178,9 +179,9 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
         console.log(`📦 배치 ${batchNumber}/${totalBatches} 처리 중 (${batch.length}개 파일)`);
         
         // 배치 내 파일들을 병렬 업로드
-        const batchPromises = batch.map(async ({ file, log }) => {
-          const currentIndex = fileLogPairs.indexOf({ file, log });
-          setCurrentUploadIndex(currentIndex);
+        const batchPromises = batch.map(async ({ file, log }, batchIndex) => {
+          const globalIndex = i + batchIndex;
+          setCurrentUploadIndex(globalIndex);
           setCurrentFileName(file.name);
           
           try {
@@ -192,12 +193,10 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
               log.id
             );
             
-            completedCount++;
             console.log(`✅ 업로드 성공: ${file.name} → ${photo.id}`);
             return { success: true, file, log, photo };
             
           } catch (error: any) {
-            failedCount++;
             failedLogs.push(log);
             
             const errorMessage = error.response?.data?.detail || error.message || '알 수 없는 오류';
@@ -208,11 +207,26 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
         });
         
         // 배치 완료 대기
-        await Promise.allSettled(batchPromises);
+        const batchResults = await Promise.allSettled(batchPromises);
+        
+        // 배치 결과 집계
+        batchResults.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            if (result.value.success) {
+              completedCount++;
+            } else {
+              failedCount++;
+            }
+          } else {
+            failedCount++;
+          }
+        });
         
         // 진행률 업데이트
         const processedFiles = completedCount + failedCount;
-        console.log(`📊 진행률: ${processedFiles}/${files.length} (${Math.round(processedFiles / files.length * 100)}%)`);
+        const progressPercent = Math.round((processedFiles / files.length) * 100);
+        setUploadProgress(progressPercent);
+        console.log(`📊 진행률: ${processedFiles}/${files.length} (${progressPercent}%)`);
         
         // 마지막 배치가 아니면 대기
         if (i + BATCH_SIZE < fileLogPairs.length) {
@@ -242,6 +256,7 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
       };
       
       setUploadResult(result);
+      setUploadProgress(100); // 완료시 100% 설정
       console.log(`🏁 업로드 완료: 성공 ${completedCount}개, 실패 ${failedCount}개`);
       
       return result;
@@ -263,6 +278,7 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
     
     setUploading(true);
     setUploadResult(null);
+    setUploadProgress(0);
     setCurrentUploadIndex(0);
     setCurrentFileName('');
     
