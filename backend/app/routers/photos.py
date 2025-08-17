@@ -38,11 +38,17 @@ async def upload_photo(
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
     
-    if not FileSecurityUtils.validate_file_type(file.filename, {'.jpg', '.jpeg', '.png', '.gif', '.webp'}):
-        raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG, PNG, GIF, and WebP files are allowed")
+    if not FileSecurityUtils.validate_file_type(file.filename, {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif'}):
+        raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG, PNG, GIF, WebP, HEIC, and HEIF files are allowed")
     
-    if not file.content_type or not file.content_type.startswith('image/'):
-        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    # HEIC 파일의 경우 브라우저에서 content_type이 다를 수 있으므로 별도 처리
+    if file.content_type:
+        # HEIC/HEIF는 image/ 타입이 아닐 수 있으므로 별도 확인
+        if not file.content_type.startswith('image/') and file.content_type not in ['application/octet-stream']:
+            # HEIC 파일 확장자 확인
+            from ..services.photo_service import is_heic_file
+            if not is_heic_file(file.filename, file.content_type):
+                raise HTTPException(status_code=400, detail="Only image files are allowed")
     
     # Check file size before reading
     if file.size and file.size > 10 * 1024 * 1024:  # 10MB

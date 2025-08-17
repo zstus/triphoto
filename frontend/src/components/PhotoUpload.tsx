@@ -351,7 +351,7 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
           margin: `${spacing.xs} 0 0 0`,
           fontSize: '12px'
         }}>
-          JPG, PNG, GIF, WebP (최대 10MB)
+          JPG, PNG, GIF, WebP, HEIC (최대 10MB)
         </p>
       </div>
 

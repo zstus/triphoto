@@ -251,11 +251,15 @@ const validateInput = {
   },
   
   file: (file: File): { valid: boolean; error?: string } => {
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
     const maxSize = 10 * 1024 * 1024; // 10MB
     
-    if (!allowedTypes.includes(file.type)) {
-      return { valid: false, error: 'Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed.' };
+    // HEIC 파일의 경우 브라우저에서 MIME 타입이 다를 수 있으므로 확장자도 확인
+    const fileName = file.name.toLowerCase();
+    const isHeicByExtension = fileName.endsWith('.heic') || fileName.endsWith('.heif');
+    
+    if (!allowedTypes.includes(file.type) && !isHeicByExtension) {
+      return { valid: false, error: 'Invalid file type. Only JPEG, PNG, GIF, WebP, HEIC, and HEIF are allowed.' };
     }
     
     if (file.size > maxSize) {
