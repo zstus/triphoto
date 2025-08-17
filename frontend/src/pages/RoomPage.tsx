@@ -287,6 +287,29 @@ const RoomPage: React.FC = () => {
     }
   };
 
+  const handleDeleteRoom = async () => {
+    if (!room || !roomId) return;
+    
+    const confirmMessage = `⚠️ 경고: 방 삭제\n\n방 "${room.name}"과(와) 모든 관련 데이터가 영구적으로 삭제됩니다:\n\n• 업로드된 모든 사진 (${photos.length}개)\n• 좋아요/싫어요 데이터\n• 참가자 정보\n• 방 정보\n\n이 작업은 되돌릴 수 없습니다.\n정말로 삭제하시겠습니까?`;
+    
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+    
+    try {
+      const result = await roomApi.deleteRoom(roomId);
+      alert(`✅ 삭제 완료\n\n방 "${result.room_name}"이(가) 성공적으로 삭제되었습니다.\n\n삭제된 내용:\n• 사진 ${result.deleted_photos_count}개\n• 관련 데이터베이스 레코드\n• 업로드 폴더`);
+      navigate('/');
+    } catch (error: any) {
+      console.error('❌ Failed to delete room:', error);
+      if (error.response?.status === 403) {
+        alert('❌ 권한이 없습니다.\n방 삭제는 특별한 권한이 필요합니다.');
+      } else {
+        alert(`❌ 방 삭제에 실패했습니다.\n\n오류: ${error.response?.data?.detail || error.message}`);
+      }
+    }
+  };
+
   if (loading) {
     return (
       <MobileLayout title="로딩 중...">
@@ -562,6 +585,48 @@ const RoomPage: React.FC = () => {
         </button>
       </div>
       
+      {/* 백도어: 이성일이 생성한 방에만 삭제 버튼 표시 */}
+      {room.creator_name === '이성일' && (
+        <div style={{ marginTop: spacing.md }}>
+          <button
+            onClick={handleDeleteRoom}
+            style={{
+              width: '100%',
+              padding: spacing.md,
+              backgroundColor: colors.danger,
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: spacing.xs,
+              transition: 'background-color 0.2s ease'
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.backgroundColor = '#dc2626';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.backgroundColor = colors.danger;
+            }}
+          >
+            🗑️ 방 삭제 (백도어)
+          </button>
+          <div style={{
+            fontSize: '10px',
+            color: colors.textMuted,
+            textAlign: 'center',
+            marginTop: spacing.xs,
+            fontStyle: 'italic'
+          }}>
+            ⚠️ 모든 사진과 데이터가 영구적으로 삭제됩니다
+          </div>
+        </div>
+      )}
+
       <div style={{ 
         fontSize: '11px',
         color: colors.textMuted,
@@ -570,7 +635,8 @@ const RoomPage: React.FC = () => {
         padding: spacing.xs,
         borderRadius: '6px',
         overflow: 'hidden',
-        textOverflow: 'ellipsis'
+        textOverflow: 'ellipsis',
+        marginTop: spacing.md
       }}>
         {roomId}
       </div>

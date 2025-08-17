@@ -2,6 +2,8 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
+import os
+import shutil
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from ..database.database import get_database
@@ -201,3 +203,94 @@ async def list_rooms(request: Request, db = Depends(get_database)):
         )
         for room in rooms
     ]
+
+@router.delete("/{room_id}")
+@limiter.limit("5/minute")
+async def delete_room(request: Request, room_id: str, db = Depends(get_database)):
+    """
+    방 삭제 API - 백도어 기능 (creator_name이 '이성일'인 경우만)
+    방 데이터베이스 레코드, 관련 사진, 좋아요/싫어요, 업로드 폴더 모두 삭제
+    """
+    # Validate room_id
+    try:
+        validated_room_id = InputValidator.validate_uuid(room_id)
+        if not SafetyValidator.validate_room_access(validated_room_id):
+            raise HTTPException(status_code=403, detail="Access denied")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid room ID format")
+    
+    # 방 정보 조회
+    room_query = "SELECT * FROM rooms WHERE id = :room_id"
+    room = await db.fetch_one(room_query, {"room_id": validated_room_id})
+    
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    # 백도어 체크: creator_name이 '이성일'인지 확인
+    if room["creator_name"] != "이성일":
+        raise HTTPException(status_code=403, detail="Only the special creator can delete rooms")
+    
+    try:
+        # 1. 사진 파일들의 경로 조회 (물리적 파일 삭제를 위해)
+        photos_query = "SELECT file_path, thumbnail_path FROM photos WHERE room_id = :room_id"
+        photos = await db.fetch_all(photos_query, {"room_id": validated_room_id})
+        
+        # 2. 데이터베이스에서 관련 데이터 삭제 (순서 중요 - 외래키 제약조건)
+        # 2-1. 좋아요 삭제
+        await db.execute("DELETE FROM likes WHERE photo_id IN (SELECT id FROM photos WHERE room_id = :room_id)", 
+                        {"room_id": validated_room_id})
+        
+        # 2-2. 싫어요 삭제
+        await db.execute("DELETE FROM dislikes WHERE photo_id IN (SELECT id FROM photos WHERE room_id = :room_id)", 
+                        {"room_id": validated_room_id})
+        
+        # 2-3. 사진 레코드 삭제
+        await db.execute("DELETE FROM photos WHERE room_id = :room_id", {"room_id": validated_room_id})
+        
+        # 2-4. 방 레코드 삭제
+        await db.execute("DELETE FROM rooms WHERE id = :room_id", {"room_id": validated_room_id})
+        
+        # 3. 물리적 파일 및 폴더 삭제
+        uploads_dir = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
+        uploads_dir = os.path.abspath(uploads_dir)
+        room_folder_path = os.path.join(uploads_dir, validated_room_id)
+        
+        # 개별 사진 파일 삭제 (안전성을 위해)
+        for photo in photos:
+            if photo["file_path"]:
+                file_path = os.path.join(uploads_dir, photo["file_path"].lstrip('/'))
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        print(f"🗑️ Deleted file: {file_path}")
+                    except Exception as e:
+                        print(f"⚠️ Failed to delete file {file_path}: {e}")
+            
+            if photo["thumbnail_path"]:
+                thumb_path = os.path.join(uploads_dir, photo["thumbnail_path"].lstrip('/'))
+                if os.path.exists(thumb_path):
+                    try:
+                        os.remove(thumb_path)
+                        print(f"🗑️ Deleted thumbnail: {thumb_path}")
+                    except Exception as e:
+                        print(f"⚠️ Failed to delete thumbnail {thumb_path}: {e}")
+        
+        # 방 폴더 전체 삭제
+        if os.path.exists(room_folder_path):
+            try:
+                shutil.rmtree(room_folder_path)
+                print(f"🗑️ Deleted room folder: {room_folder_path}")
+            except Exception as e:
+                print(f"⚠️ Failed to delete room folder {room_folder_path}: {e}")
+        
+        return {
+            "message": f"Room '{room['name']}' and all associated data have been permanently deleted",
+            "room_id": validated_room_id,
+            "room_name": room["name"],
+            "deleted_photos_count": len(photos),
+            "deleted_by": room["creator_name"]
+        }
+        
+    except Exception as e:
+        print(f"❌ Error during room deletion: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete room: {str(e)}")

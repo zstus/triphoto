@@ -215,6 +215,15 @@ export const roomApi = {
     const response = await api.get(`/rooms/${roomId}/participants/list`);
     return response.data;
   },
+
+  deleteRoom: async (roomId: string): Promise<{ message: string; room_id: string; room_name: string; deleted_photos_count: number; deleted_by: string }> => {
+    if (!validateInput.roomId(roomId)) {
+      throw new Error('Invalid room ID format');
+    }
+    
+    const response = await api.delete(`/rooms/${roomId}`);
+    return response.data;
+  },
 };
 
 // Input validation helpers
