@@ -6,7 +6,7 @@ import os
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from ..database.database import get_database
-from ..models.models import Room, Photo
+from ..models.models import Room, Photo, UploadLog
 from ..models.schemas import PhotoResponse
 from ..services.photo_service import save_uploaded_file
 from ..utils.validation import InputValidator, SafetyValidator
@@ -22,6 +22,7 @@ async def upload_photo(
     room_id: str,
     uploader_name: str = Form(...),
     file: UploadFile = File(...),
+    log_id: Optional[str] = Form(None),  # 업로드 로그 ID (선택사항)
     db = Depends(get_database)
 ):
     # Security validations
@@ -52,6 +53,26 @@ async def upload_photo(
     
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
+    
+    # 업로드 로그 ID가 제공된 경우 로그 상태를 'uploading'으로 업데이트
+    if log_id:
+        try:
+            validated_log_id = InputValidator.validate_uuid(log_id)
+            log_update_query = """
+                UPDATE upload_logs 
+                SET status = 'uploading', started_at = datetime('now')
+                WHERE id = :log_id AND room_id = :room_id AND uploader_name = :uploader_name
+            """
+            await db.execute(log_update_query, {
+                "log_id": validated_log_id,
+                "room_id": validated_room_id,
+                "uploader_name": validated_uploader
+            })
+            print(f"📝 Upload log {validated_log_id} status updated to 'uploading'")
+        except ValueError:
+            print(f"⚠️ Invalid log ID format: {log_id}")
+        except Exception as e:
+            print(f"⚠️ Failed to update upload log: {e}")
     
     upload_dir = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "uploads"))
     
@@ -117,6 +138,22 @@ async def upload_photo(
             "taken_at": file_data["taken_at"]
         })
         
+        # 업로드 성공 시 로그 업데이트
+        if log_id:
+            try:
+                success_log_query = """
+                    UPDATE upload_logs 
+                    SET status = 'success', photo_id = :photo_id, completed_at = datetime('now')
+                    WHERE id = :log_id
+                """
+                await db.execute(success_log_query, {
+                    "photo_id": photo_id,
+                    "log_id": validated_log_id
+                })
+                print(f"✅ Upload log {validated_log_id} marked as successful with photo ID {photo_id}")
+            except Exception as e:
+                print(f"⚠️ Failed to update success log: {e}")
+        
         photo_query = """
             SELECT p.*, 
                    COUNT(l.id) as like_count,
@@ -146,6 +183,23 @@ async def upload_photo(
         )
     
     except Exception as e:
+        # 업로드 실패 시 로그 업데이트
+        if log_id:
+            try:
+                error_message = str(e)[:500]  # 에러 메시지 길이 제한
+                failed_log_query = """
+                    UPDATE upload_logs 
+                    SET status = 'failed', error_message = :error_message, completed_at = datetime('now')
+                    WHERE id = :log_id
+                """
+                await db.execute(failed_log_query, {
+                    "error_message": error_message,
+                    "log_id": validated_log_id
+                })
+                print(f"❌ Upload log {validated_log_id} marked as failed: {error_message}")
+            except Exception as log_error:
+                print(f"⚠️ Failed to update error log: {log_error}")
+        
         raise HTTPException(status_code=500, detail=f"Failed to upload photo: {str(e)}")
 
 @router.get("/{room_id}", response_model=List[PhotoResponse])

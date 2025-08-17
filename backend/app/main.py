@@ -15,7 +15,7 @@ load_dotenv()
 from .database.database import engine, database
 from .models import models
 from .models.auth import User
-from .routers import rooms, photos, likes, dislikes
+from .routers import rooms, photos, likes, dislikes, upload_logs
 from .auth.auth import auth_backend, fastapi_users
 from .schemas.auth import UserRead, UserCreate
 
@@ -145,6 +145,7 @@ app.include_router(rooms.router, prefix="/api/rooms", tags=["rooms"])
 app.include_router(photos.router, prefix="/api/photos", tags=["photos"])
 app.include_router(likes.router, prefix="/api/likes", tags=["likes"])
 app.include_router(dislikes.router, prefix="/api/dislikes", tags=["dislikes"])
+app.include_router(upload_logs.router, prefix="/api/upload-logs", tags=["upload-logs"])
 
 @app.get("/")
 @limiter.limit("60/minute")

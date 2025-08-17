@@ -9,7 +9,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 환경변수에서 DATABASE_URL을 가져오고, 없으면 개발용 기본값 사용
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./travel_photos.db")
+# 절대 경로로 데이터베이스 위치 지정
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+default_db_path = os.path.join(backend_dir, "travel_photos.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{default_db_path}")
 
 database = Database(DATABASE_URL)
 

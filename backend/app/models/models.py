@@ -68,3 +68,40 @@ class Participant(Base):
     __table_args__ = (
         {'sqlite_autoincrement': True},
     )
+
+class UploadSession(Base):
+    __tablename__ = "upload_sessions"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    room_id = Column(String, ForeignKey("rooms.id"), nullable=False)
+    user_name = Column(String, nullable=False)
+    total_files = Column(Integer, nullable=False)
+    completed_files = Column(Integer, default=0)
+    failed_files = Column(Integer, default=0)
+    started_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime)
+    status = Column(String, default='in_progress')  # 'in_progress', 'completed', 'partially_failed', 'failed'
+    
+    # 관계 설정
+    upload_logs = relationship("UploadLog", back_populates="session", cascade="all, delete-orphan")
+
+class UploadLog(Base):
+    __tablename__ = "upload_logs"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, ForeignKey("upload_sessions.id"), nullable=False)
+    room_id = Column(String, ForeignKey("rooms.id"), nullable=False)
+    original_filename = Column(String, nullable=False)
+    file_size = Column(Integer)
+    mime_type = Column(String)
+    uploader_name = Column(String, nullable=False)
+    status = Column(String, nullable=False, default='pending')  # 'pending', 'uploading', 'success', 'failed', 'retrying'
+    photo_id = Column(String, ForeignKey("photos.id"))  # 성공시 생성된 photo ID
+    error_message = Column(Text)
+    retry_count = Column(Integer, default=0)
+    started_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime)
+    
+    # 관계 설정
+    session = relationship("UploadSession", back_populates="upload_logs")
+    photo = relationship("Photo")

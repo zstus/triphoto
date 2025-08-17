@@ -8,7 +8,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from ..database.database import get_database
 from ..models.models import Room, Photo, Participant
-from ..models.schemas import RoomCreate, RoomResponse, RoomJoin
+from ..models.schemas import RoomCreate, RoomResponse, RoomJoin, RoomStatistics
 from ..utils.validation import InputValidator, SafetyValidator
 
 limiter = Limiter(key_func=get_remote_address)
@@ -339,3 +339,84 @@ async def delete_room(request: Request, room_id: str, db = Depends(get_database)
     except Exception as e:
         print(f"❌ Error during room deletion: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete room: {str(e)}")
+
+@router.get("/{room_id}/statistics", response_model=RoomStatistics)
+@limiter.limit("30/minute")
+async def get_room_statistics(request: Request, room_id: str, db = Depends(get_database)):
+    """
+    방의 상세 통계 정보를 조회합니다.
+    전체 사진 수, 숨겨진 사진 수 (싫어요가 많은 사진), 보이는 사진 수, 좋아요/싫어요 총합, 참가자 수
+    """
+    # Validate room_id
+    try:
+        validated_room_id = InputValidator.validate_uuid(room_id)
+        if not SafetyValidator.validate_room_access(validated_room_id):
+            raise HTTPException(status_code=403, detail="Access denied")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid room ID format")
+    
+    # 방 존재 확인
+    room_query = "SELECT * FROM rooms WHERE id = :room_id AND is_active = 1"
+    room = await db.fetch_one(room_query, {"room_id": validated_room_id})
+    
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    # 전체 사진 수
+    total_photos_query = "SELECT COUNT(*) as count FROM photos WHERE room_id = :room_id"
+    total_photos_result = await db.fetch_one(total_photos_query, {"room_id": validated_room_id})
+    total_photos = total_photos_result["count"] if total_photos_result else 0
+    
+    # 각 사진별 좋아요/싫어요 수 계산 및 숨겨진 사진 수 계산
+    photo_stats_query = """
+        SELECT 
+            p.id,
+            COALESCE(like_counts.like_count, 0) as like_count,
+            COALESCE(dislike_counts.dislike_count, 0) as dislike_count
+        FROM photos p
+        LEFT JOIN (
+            SELECT photo_id, COUNT(*) as like_count
+            FROM likes
+            GROUP BY photo_id
+        ) like_counts ON p.id = like_counts.photo_id
+        LEFT JOIN (
+            SELECT photo_id, COUNT(*) as dislike_count
+            FROM dislikes
+            GROUP BY photo_id
+        ) dislike_counts ON p.id = dislike_counts.photo_id
+        WHERE p.room_id = :room_id
+    """
+    
+    photo_stats = await db.fetch_all(photo_stats_query, {"room_id": validated_room_id})
+    
+    # 통계 계산
+    total_likes = 0
+    total_dislikes = 0
+    hidden_photos = 0
+    
+    for photo in photo_stats:
+        like_count = photo["like_count"] or 0
+        dislike_count = photo["dislike_count"] or 0
+        
+        total_likes += like_count
+        total_dislikes += dislike_count
+        
+        # 싫어요가 좋아요보다 많으면 숨겨진 사진으로 분류
+        if dislike_count > like_count:
+            hidden_photos += 1
+    
+    visible_photos = total_photos - hidden_photos
+    
+    # 참가자 수
+    participants_query = "SELECT COUNT(*) as count FROM participants WHERE room_id = :room_id"
+    participants_result = await db.fetch_one(participants_query, {"room_id": validated_room_id})
+    participants_count = participants_result["count"] if participants_result else 0
+    
+    return RoomStatistics(
+        total_photos=total_photos,
+        hidden_photos=hidden_photos,
+        visible_photos=visible_photos,
+        total_likes=total_likes,
+        total_dislikes=total_dislikes,
+        participants_count=participants_count
+    )
