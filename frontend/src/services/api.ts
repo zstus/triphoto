@@ -54,9 +54,18 @@ const getApiBaseUrl = () => {
 const API_BASE_URL = getApiBaseUrl();
 console.log('🔗 Final API Base URL:', API_BASE_URL);
 
-// 이미지 URL을 위한 base URL (API URL에서 /api 제거)
+// 이미지 URL을 위한 base URL - 별도 포트 사용 가능
 export const getImageBaseUrl = (): string => {
-  return API_BASE_URL.replace('/api', '');
+  // 환경 변수로 이미지 전용 URL이 설정되어 있으면 사용
+  if (process.env.REACT_APP_IMAGE_BASE_URL) {
+    console.log('🖼️ Using dedicated image base URL:', process.env.REACT_APP_IMAGE_BASE_URL);
+    return process.env.REACT_APP_IMAGE_BASE_URL;
+  }
+  
+  // 기본값: API URL에서 /api만 제거 (기존 방식)
+  const imageBaseUrl = API_BASE_URL.replace('/api', '');
+  console.log('🖼️ Using API-derived image base URL:', imageBaseUrl);
+  return imageBaseUrl;
 };
 
 const api = axios.create({
