@@ -85,8 +85,27 @@ app.add_middleware(
 
 # Environment-based upload directory configuration
 uploads_dir = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "uploads"))
+
+# 절대 경로로 변환
+uploads_dir = os.path.abspath(uploads_dir)
+
+# 디버깅 로그 추가
+print(f"🔍 FastAPI StaticFiles Configuration:")
+print(f"🔍 Current working directory: {os.getcwd()}")
+print(f"🔍 Upload directory (relative): {os.getenv('UPLOAD_DIR', 'uploads')}")
+print(f"🔍 Upload directory (absolute): {uploads_dir}")
+print(f"🔍 Upload directory exists: {os.path.exists(uploads_dir)}")
+
+# 디렉토리 생성
 os.makedirs(uploads_dir, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+
+# StaticFiles 마운트 시도
+try:
+    app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+    print(f"✅ StaticFiles mounted successfully on /uploads -> {uploads_dir}")
+except Exception as e:
+    print(f"❌ StaticFiles mount failed: {e}")
+    raise
 
 @app.on_event("startup")
 async def startup():
@@ -136,3 +155,29 @@ async def root(request: Request):
 @limiter.limit("30/minute")
 async def health_check(request: Request):
     return {"status": "healthy", "database": "connected"}
+
+@app.get("/debug/uploads")
+@limiter.limit("10/minute")
+async def debug_uploads(request: Request):
+    """디버깅용: uploads 디렉토리 상태 확인"""
+    try:
+        # 디렉토리 내용 확인
+        upload_contents = []
+        if os.path.exists(uploads_dir):
+            for item in os.listdir(uploads_dir):
+                item_path = os.path.join(uploads_dir, item)
+                upload_contents.append({
+                    "name": item,
+                    "is_dir": os.path.isdir(item_path),
+                    "size": os.path.getsize(item_path) if os.path.isfile(item_path) else None
+                })
+        
+        return {
+            "upload_dir": uploads_dir,
+            "upload_dir_exists": os.path.exists(uploads_dir),
+            "working_directory": os.getcwd(),
+            "upload_contents": upload_contents[:10],  # 처음 10개만
+            "env_upload_dir": os.getenv("UPLOAD_DIR", "not_set")
+        }
+    except Exception as e:
+        return {"error": str(e)}
