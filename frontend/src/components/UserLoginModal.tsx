@@ -135,17 +135,25 @@ const UserLoginModal: React.FC<UserLoginModalProps> = ({ roomId, onLogin, onClos
             fontWeight: '600',
             color: colors.text
           }}>
-            방 입장
+            방 참가하기
           </h2>
           {roomName && (
             <p style={{ 
               color: colors.textMuted,
-              margin: 0,
+              margin: `0 0 ${spacing.sm} 0`,
               fontSize: '16px'
             }}>
               <strong style={{ color: colors.primary }}>{roomName}</strong>에 참가합니다
             </p>
           )}
+          <p style={{ 
+            color: colors.textMuted,
+            margin: 0,
+            fontSize: '14px',
+            lineHeight: '1.4'
+          }}>
+            이 방의 사진을 보고 업로드하려면<br />먼저 이름을 입력해주세요
+          </p>
         </div>
 
         <form onSubmit={handleSubmit}>

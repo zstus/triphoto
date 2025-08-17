@@ -74,77 +74,10 @@ const RoomPage: React.FC = () => {
       return;
     }
 
-    // 먼저 방별 사용자 이름 확인
-    const roomUserData = JSON.parse(localStorage.getItem('roomUsers') || '{}');
-    let userName = roomUserData[roomId] || localStorage.getItem('userName');
-    console.log('👤 Room-specific userName:', roomUserData[roomId]);
-    console.log('👤 Global userName:', localStorage.getItem('userName'));
-    console.log('👤 Final userName:', userName);
-    console.log('🌐 Current hostname:', window.location.hostname);
-    
-    // 네트워크 IP 접근 시 사용자 이름이 없으면 sessionStorage도 확인
-    if (!userName && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      // 세션 스토리지에서 확인 (같은 브라우저 세션 내에서 유지)
-      const sessionUserName = sessionStorage.getItem('userName');
-      if (sessionUserName) {
-        userName = sessionUserName;
-        localStorage.setItem('userName', userName);
-        console.log('🔄 Recovered username from session:', userName);
-      } else {
-        // 네트워크 접근 시 임시로 기본 사용자 이름 생성 (무한 루프 방지)
-        const tempUserName = 'NetworkUser';
-        localStorage.setItem('userName', tempUserName);
-        sessionStorage.setItem('userName', tempUserName);
-        userName = tempUserName;
-        console.log('🌐 Network access: using temporary username to prevent infinite loop:', userName);
-      }
-    }
-    
-    if (userName && userName.trim().length >= 2) {
-      console.log('✅ Valid username found, loading room data directly');
-      
-      // loadRoomData 호출 대신 직접 실행
-      const loadData = async () => {
-        console.log('🔄 Loading room data for:', roomId);
-        setLoading(true);
-        try {
-          console.log('📡 Making API requests...');
-          console.log('👤 Username for API call:', userName);
-          console.log('🌐 Will use new API:', userName && userName.trim().length >= 2);
-          
-          const roomData = await roomApi.getRoom(roomId);
-          console.log('✅ Room data loaded');
-          
-          const photosData = userName && userName.trim().length >= 2 
-            ? await photoApi.getRoomPhotosWithUserStatus(roomId, userName)
-            : await photoApi.getRoomPhotos(roomId);
-          console.log('✅ Photos data loaded:', photosData.length, 'photos');
-          
-          const participantsData = await roomApi.getParticipantsList(roomId);
-          console.log('✅ Participants data loaded');
-          
-          setRoom(roomData);
-          setPhotos(photosData);
-          setParticipants(participantsData.participants);
-        } catch (error: any) {
-          console.error('❌ Failed to load room data:', error);
-          console.error('❌ Error details:', {
-            message: error?.message,
-            response: error?.response,
-            status: error?.response?.status,
-            data: error?.response?.data
-          });
-          alert('방 정보를 불러올 수 없습니다.');
-        } finally {
-          setLoading(false);
-        }
-      };
-      
-      loadData();
-    } else {
-      console.log('🚪 Showing login modal');
-      setShowLoginModal(true);
-    }
+    // 링크 공유로 접근시 항상 로그인 모달 표시 (보안 강화)
+    console.log('🚪 Showing login modal for room access');
+    setShowLoginModal(true);
+    setLoading(false);
   }, [roomId]); // roomId만 의존성으로 유지
 
   const handleLogin = async (userName: string) => {
@@ -331,6 +264,26 @@ const RoomPage: React.FC = () => {
           }} />
           <p style={{ color: colors.textMuted }}>방 정보를 불러오는 중...</p>
         </div>
+      </MobileLayout>
+    );
+  }
+
+  // 로그인 모달이 표시되는 동안 뒤의 내용을 숨김
+  if (showLoginModal) {
+    return (
+      <MobileLayout title="방 접근">
+        {/* 로그인 모달 */}
+        {roomId && (
+          <UserLoginModal
+            roomId={roomId}
+            onLogin={handleLogin}
+            onClose={() => {
+              console.log('🚪 Login modal closed, navigating to home');
+              setShowLoginModal(false);
+              navigate('/', { replace: true });
+            }}
+          />
+        )}
       </MobileLayout>
     );
   }
@@ -585,8 +538,11 @@ const RoomPage: React.FC = () => {
         </button>
       </div>
       
-      {/* 백도어: 이성일이 생성한 방에만 삭제 버튼 표시 */}
-      {room.creator_name === '이성일' && (
+      {/* 백도어: '이성일'로 로그인한 사용자에게만 삭제 버튼 표시 */}
+      {(() => {
+        const currentUserName = localStorage.getItem('userName') || '';
+        return currentUserName === '이성일';
+      })() && (
         <div style={{ marginTop: spacing.md }}>
           <button
             onClick={handleDeleteRoom}
@@ -613,7 +569,7 @@ const RoomPage: React.FC = () => {
               e.currentTarget.style.backgroundColor = colors.danger;
             }}
           >
-            🗑️ 방 삭제 (백도어)
+            🗑️ 방 삭제 (관리자)
           </button>
           <div style={{
             fontSize: '10px',
@@ -711,18 +667,6 @@ const RoomPage: React.FC = () => {
         />
       )}
 
-      {/* 로그인 모달 */}
-      {showLoginModal && roomId && (
-        <UserLoginModal
-          roomId={roomId}
-          onLogin={handleLogin}
-          onClose={() => {
-            console.log('🚪 Login modal closed, navigating to home');
-            setShowLoginModal(false);
-            navigate('/', { replace: true });
-          }}
-        />
-      )}
 
       {/* 링크 공유 모달 */}
       {showLinkShareModal && (
