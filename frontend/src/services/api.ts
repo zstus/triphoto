@@ -39,14 +39,17 @@ const getApiBaseUrl = () => {
   const currentHostname = window.location.hostname;
   console.log('🔍 Current hostname:', currentHostname);
   
+  // 개발 환경에서 동적 포트 설정 사용
+  const defaultPort = process.env.REACT_APP_API_PORT || '8000';
+  
   // localhost/127.0.0.1로 접근하는 경우: localhost API 사용 (개발 환경)
   if (currentHostname === 'localhost' || currentHostname === '127.0.0.1') {
     console.log('💻 Localhost access detected - using localhost API');
-    return 'http://localhost:8000/api';
+    return `http://localhost:${defaultPort}/api`;
   }
   
   // 네트워크 IP로 접근하는 경우: 해당 IP의 API 사용
-  const networkApiUrl = `http://${currentHostname}:8000/api`;
+  const networkApiUrl = `http://${currentHostname}:${defaultPort}/api`;
   console.log('🌐 Network access detected - using network API:', networkApiUrl);
   return networkApiUrl;
 };
