@@ -292,7 +292,7 @@ const RoomPage: React.FC = () => {
     
     const confirmMessage = `⚠️ 경고: 방 삭제\n\n방 "${room.name}"과(와) 모든 관련 데이터가 영구적으로 삭제됩니다:\n\n• 업로드된 모든 사진 (${photos.length}개)\n• 좋아요/싫어요 데이터\n• 참가자 정보\n• 방 정보\n\n이 작업은 되돌릴 수 없습니다.\n정말로 삭제하시겠습니까?`;
     
-    if (!confirm(confirmMessage)) {
+    if (!window.confirm(confirmMessage)) {
       return;
     }
     
