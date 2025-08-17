@@ -7,7 +7,7 @@ import shutil
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from ..database.database import get_database
-from ..models.models import Room, Photo
+from ..models.models import Room, Photo, Participant
 from ..models.schemas import RoomCreate, RoomResponse, RoomJoin
 from ..utils.validation import InputValidator, SafetyValidator
 
@@ -37,6 +37,18 @@ async def create_room(request: Request, room_data: RoomCreate, db = Depends(get_
         "name": validated_name,
         "description": validated_description,
         "creator_name": validated_creator
+    })
+    
+    # 방 생성자를 첫 번째 참가자로 추가
+    participant_query = """
+        INSERT INTO participants (id, room_id, user_name, joined_at)
+        VALUES (:id, :room_id, :user_name, datetime('now'))
+    """
+    participant_id = str(__import__('uuid').uuid4())
+    await db.execute(participant_query, {
+        "id": participant_id,
+        "room_id": room_id,
+        "user_name": validated_creator
     })
     
     room_query = "SELECT * FROM rooms WHERE id = :room_id"
@@ -103,8 +115,34 @@ async def join_room(request: Request, room_id: str, join_data: RoomJoin, db = De
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     
+    # 이미 참가한 사용자인지 확인
+    existing_participant_query = """
+        SELECT id FROM participants 
+        WHERE room_id = :room_id AND user_name = :user_name
+    """
+    existing_participant = await db.fetch_one(existing_participant_query, {
+        "room_id": validated_room_id,
+        "user_name": validated_username
+    })
+    
+    # 새로운 참가자인 경우에만 추가
+    if not existing_participant:
+        participant_query = """
+            INSERT INTO participants (id, room_id, user_name, joined_at)
+            VALUES (:id, :room_id, :user_name, datetime('now'))
+        """
+        participant_id = str(__import__('uuid').uuid4())
+        await db.execute(participant_query, {
+            "id": participant_id,
+            "room_id": validated_room_id,
+            "user_name": validated_username
+        })
+        message = f"{validated_username} successfully joined room"
+    else:
+        message = f"{validated_username} rejoined room"
+    
     return {
-        "message": f"{validated_username} successfully joined room",
+        "message": message,
         "room_id": validated_room_id,
         "room_name": room["name"]
     }
@@ -126,10 +164,10 @@ async def get_room_participants_count(request: Request, room_id: str, db = Depen
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     
-    # 방에 사진을 업로드한 고유 사용자 수 계산
+    # 방에 참가한 사용자 수 계산
     participants_query = """
-        SELECT COUNT(DISTINCT uploader_name) as participant_count
-        FROM photos 
+        SELECT COUNT(*) as participant_count
+        FROM participants 
         WHERE room_id = :room_id
     """
     result = await db.fetch_one(participants_query, {"room_id": validated_room_id})
@@ -153,28 +191,32 @@ async def get_room_participants_list(request: Request, room_id: str, db = Depend
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     
-    # 방 생성자도 포함하여 모든 참가자 목록 조회
+    # 참가자 목록과 각자의 사진 수 조회
     participants_query = """
-        SELECT DISTINCT uploader_name as name, 
-               COUNT(*) as photo_count,
-               MIN(uploaded_at) as first_upload_at
-        FROM photos 
-        WHERE room_id = :room_id
-        GROUP BY uploader_name
-        ORDER BY first_upload_at ASC
+        SELECT p.user_name as name, 
+               p.joined_at,
+               COALESCE(photo_counts.photo_count, 0) as photo_count
+        FROM participants p
+        LEFT JOIN (
+            SELECT uploader_name, COUNT(*) as photo_count
+            FROM photos 
+            WHERE room_id = :room_id
+            GROUP BY uploader_name
+        ) photo_counts ON p.user_name = photo_counts.uploader_name
+        WHERE p.room_id = :room_id
+        ORDER BY p.joined_at ASC
     """
     participants = await db.fetch_all(participants_query, {"room_id": validated_room_id})
     
-    # 방 생성자가 사진을 올리지 않았다면 추가
-    creator_in_list = any(p["name"] == room["creator_name"] for p in participants)
-    result_participants = list(participants)
-    
-    if not creator_in_list:
-        result_participants.insert(0, {
-            "name": room["creator_name"],
-            "photo_count": 0,
-            "first_upload_at": room["created_at"]
-        })
+    # 결과 변환
+    result_participants = [
+        {
+            "name": p["name"],
+            "photo_count": p["photo_count"],
+            "first_upload_at": p["joined_at"]  # joined_at을 first_upload_at으로 사용
+        }
+        for p in participants
+    ]
     
     return {"participants": result_participants}
 
@@ -247,7 +289,10 @@ async def delete_room(request: Request, room_id: str, db = Depends(get_database)
         # 2-3. 사진 레코드 삭제
         await db.execute("DELETE FROM photos WHERE room_id = :room_id", {"room_id": validated_room_id})
         
-        # 2-4. 방 레코드 삭제
+        # 2-4. 참가자 레코드 삭제
+        await db.execute("DELETE FROM participants WHERE room_id = :room_id", {"room_id": validated_room_id})
+        
+        # 2-5. 방 레코드 삭제
         await db.execute("DELETE FROM rooms WHERE id = :room_id", {"room_id": validated_room_id})
         
         # 3. 물리적 파일 및 폴더 삭제

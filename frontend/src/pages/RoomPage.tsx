@@ -93,6 +93,9 @@ const RoomPage: React.FC = () => {
     console.log('🔄 Loading room data after login');
     setLoading(true);
     try {
+      // 약간의 지연을 주어 백엔드에서 참가자 추가가 완료되도록 함
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       const [roomData, photosData, participantsData] = await Promise.all([
         roomApi.getRoom(roomId),
         userName && userName.trim().length >= 2 
@@ -102,6 +105,7 @@ const RoomPage: React.FC = () => {
       ]);
       
       console.log('✅ Room data loaded after login');
+      console.log('👥 Participants after login:', participantsData.participants);
       setRoom(roomData);
       setPhotos(photosData);
       setParticipants(participantsData.participants);

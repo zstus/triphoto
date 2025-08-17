@@ -55,3 +55,16 @@ class Dislike(Base):
     created_at = Column(DateTime, server_default=func.now())
     
     photo = relationship("Photo", back_populates="dislikes")
+
+class Participant(Base):
+    __tablename__ = "participants"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    room_id = Column(String, ForeignKey("rooms.id"), nullable=False)
+    user_name = Column(String, nullable=False)
+    joined_at = Column(DateTime, server_default=func.now())
+    
+    # 유니크 제약조건 (같은 방에 같은 이름으로 중복 참가 방지)
+    __table_args__ = (
+        {'sqlite_autoincrement': True},
+    )
