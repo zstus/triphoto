@@ -81,7 +81,14 @@ const UserLoginModal: React.FC<UserLoginModalProps> = ({ roomId, onLogin, onClos
       const sanitizedName = sanitizeInput(trimmedName);
       localStorage.setItem('userName', sanitizedName);
       sessionStorage.setItem('userName', sanitizedName);
+      
+      // 방별 사용자 이름도 업데이트 (기존 캐시 덮어쓰기)
+      const roomUserData = JSON.parse(localStorage.getItem('roomUsers') || '{}');
+      roomUserData[roomId] = sanitizedName;
+      localStorage.setItem('roomUsers', JSON.stringify(roomUserData));
+      
       console.log('💾 Username saved to both localStorage and sessionStorage:', sanitizedName);
+      console.log('💾 Room-specific username updated for room:', roomId);
       
       // 부모 컴포넌트에 로그인 완료 알림
       onLogin(sanitizedName);

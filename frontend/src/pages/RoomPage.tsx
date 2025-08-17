@@ -474,7 +474,10 @@ const RoomPage: React.FC = () => {
           defaultValue={(() => {
             if (!roomId) return '';
             const roomUserData = JSON.parse(localStorage.getItem('roomUsers') || '{}');
-            return roomUserData[roomId] || localStorage.getItem('userName') || '';
+            const roomSpecificName = roomUserData[roomId];
+            const globalName = localStorage.getItem('userName');
+            console.log('🔍 Username loading - Room:', roomId, 'RoomSpecific:', roomSpecificName, 'Global:', globalName);
+            return roomSpecificName || globalName || '';
           })()}
           onBlur={(e) => {
             const name = e.target.value.trim();
@@ -538,7 +541,7 @@ const RoomPage: React.FC = () => {
         </button>
       </div>
       
-      {/* 백도어: '이성일'로 로그인한 사용자에게만 삭제 버튼 표시 */}
+      {/* 백도어: '이성일'로 로그인한 사용자에게만 관리자 기능 표시 */}
       {(() => {
         const currentUserName = localStorage.getItem('userName') || '';
         return currentUserName === '이성일';
@@ -560,7 +563,8 @@ const RoomPage: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               gap: spacing.xs,
-              transition: 'background-color 0.2s ease'
+              transition: 'background-color 0.2s ease',
+              marginBottom: spacing.sm
             }}
             onMouseOver={(e) => {
               e.currentTarget.style.backgroundColor = '#dc2626';
@@ -571,6 +575,37 @@ const RoomPage: React.FC = () => {
           >
             🗑️ 방 삭제 (관리자)
           </button>
+          
+          {/* 디버깅용 localStorage 초기화 버튼 */}
+          <button
+            onClick={() => {
+              if (window.confirm('localStorage를 초기화하시겠습니까?\n모든 저장된 사용자 이름이 삭제됩니다.')) {
+                localStorage.removeItem('userName');
+                localStorage.removeItem('roomUsers');
+                sessionStorage.removeItem('userName');
+                alert('localStorage가 초기화되었습니다.\n페이지를 새로고침해주세요.');
+                window.location.reload();
+              }
+            }}
+            style={{
+              width: '100%',
+              padding: spacing.sm,
+              backgroundColor: colors.warning,
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: spacing.xs
+            }}
+          >
+            🔧 캐시 초기화 (디버깅)
+          </button>
+          
           <div style={{
             fontSize: '10px',
             color: colors.textMuted,
@@ -578,7 +613,7 @@ const RoomPage: React.FC = () => {
             marginTop: spacing.xs,
             fontStyle: 'italic'
           }}>
-            ⚠️ 모든 사진과 데이터가 영구적으로 삭제됩니다
+            ⚠️ 관리자 전용 기능입니다
           </div>
         </div>
       )}
