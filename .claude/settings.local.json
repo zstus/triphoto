@@ -37,7 +37,11 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(cp:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(DATABASE_URL=\"sqlite:///./travel_photos.db\" python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000)",
+      "Bash(REACT_APP_API_URL=http://localhost:8000/api npm start)",
+      "Bash(touch:*)"
     ],
     "deny": []
   }
