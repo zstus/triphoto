@@ -69,13 +69,14 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
 
   // Batch upload utility function
   const uploadFilesInBatches = async (files: File[], userName: string) => {
-    const BATCH_SIZE = 3; // 3개씩 배치 업로드 (더 안전)
-    const BATCH_DELAY = 5000; // 배치 간 5초 대기 (rate limiting 안전)
+    const BATCH_SIZE = 5; // 5개씩 배치 업로드 (80/minute 지원)
+    const BATCH_DELAY = 4000; // 배치 간 4초 대기 (rate limiting 최적화)
     
     const totalFiles = files.length;
     let completedFiles = 0;
     let skippedFiles = 0;
     const errors: string[] = [];
+    const retryQueue: File[] = []; // 429 에러 재시도 큐
 
     // 파일을 배치로 분할
     const batches = [];
@@ -116,7 +117,8 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
             } else if (error.response?.status === 413) {
               errors.push(`${file.name}: 파일 크기가 너무 큽니다 (최대 10MB)`);
             } else if (error.response?.status === 429) {
-              errors.push(`${file.name}: 요청이 너무 많습니다. 잠시 후 다시 시도해주세요`);
+              console.log(`⏳ Rate limited - adding ${file.name} to retry queue`);
+              retryQueue.push(file); // 429 에러는 재시도 큐에 추가
             } else if (error.response?.status === 419) {
               errors.push(`${file.name}: 보안 토큰 오류. 페이지를 새로고침해주세요`);
             } else {
@@ -129,7 +131,7 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
         }
       });
 
-      // 진행률 업데이트
+      // 진행률 업데이트 (재시도 파일은 제외)
       const processedFiles = completedFiles + skippedFiles + errors.length;
       setUploadProgress((processedFiles / totalFiles) * 100);
 
@@ -137,6 +139,49 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
       if (batchIndex < batches.length - 1) {
         console.log(`⏳ 다음 배치까지 ${BATCH_DELAY/1000}초 대기...`);
         await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+      }
+    }
+
+    // 429 에러 재시도 처리
+    if (retryQueue.length > 0) {
+      console.log(`🔄 ${retryQueue.length}개 파일 재시도 시작 (429 에러 복구)`);
+      await new Promise(resolve => setTimeout(resolve, 8000)); // 8초 대기 후 재시도
+      
+      // 재시도 파일들을 더 작은 배치로 처리 (안전)
+      const retryBatchSize = 2;
+      const retryDelay = 6000; // 6초 간격
+      
+      for (let i = 0; i < retryQueue.length; i += retryBatchSize) {
+        const retryBatch = retryQueue.slice(i, i + retryBatchSize);
+        console.log(`🔄 재시도 배치 ${Math.floor(i/retryBatchSize) + 1} (${retryBatch.length}개 파일)`);
+        
+        const retryPromises = retryBatch.map(async (file) => {
+          try {
+            await photoApi.uploadPhoto(roomId, file, userName);
+            completedFiles++;
+            console.log(`✅ ${file.name} 재시도 성공`);
+            return { success: true, file, error: null };
+          } catch (error: any) {
+            if (error.response?.status === 429) {
+              errors.push(`${file.name}: 재시도 실패 - 서버 부하가 높습니다`);
+            } else {
+              errors.push(`${file.name}: 재시도 실패 (${error.message || '알 수 없는 오류'})`);
+            }
+            return { success: false, file, error };
+          }
+        });
+        
+        await Promise.allSettled(retryPromises);
+        
+        // 진행률 업데이트
+        const finalProcessedFiles = completedFiles + skippedFiles + errors.length;
+        setUploadProgress((finalProcessedFiles / totalFiles) * 100);
+        
+        // 마지막 재시도 배치가 아니라면 대기
+        if (i + retryBatchSize < retryQueue.length) {
+          console.log(`⏳ 다음 재시도 배치까지 ${retryDelay/1000}초 대기...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
       }
     }
 
@@ -186,8 +231,16 @@ const PhotoUpload: React.FC<PhotoUploadProps> = ({ roomId, onUploadSuccess }) =>
       if (skippedFiles > 0) {
         message += `\n${skippedFiles}개의 중복 사진은 건너뛰었습니다. 🔄`;
       }
+      
+      // 429 재시도 관련 메시지
+      const retrySuccessCount = completedFiles - (files.length - errors.length - skippedFiles);
+      if (retrySuccessCount > 0) {
+        message += `\n${retrySuccessCount}개의 사진이 재시도로 성공했습니다. 🔄✅`;
+      }
+      
       if (errors.length > skippedFiles) {
-        message += `\n${errors.length - skippedFiles}개의 사진 업로드에 실패했습니다. ❌`;
+        const actualFailures = errors.length - skippedFiles;
+        message += `\n${actualFailures}개의 사진 업로드에 실패했습니다. ❌`;
       }
       
       alert(message || '업로드할 새로운 사진이 없습니다.');

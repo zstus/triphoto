@@ -16,7 +16,7 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter()
 
 @router.post("/{room_id}/upload", response_model=PhotoResponse)
-@limiter.limit("20/minute")
+@limiter.limit(os.getenv("PHOTO_UPLOAD_RATE_LIMIT", "80/minute"))
 async def upload_photo(
     request: Request,
     room_id: str,

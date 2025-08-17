@@ -110,6 +110,79 @@ frontend/src/
 4. Thumbnail generation for gallery performance
 5. Database record creation with metadata
 
+### Single-Port Image Serving Solution
+
+#### Problem Background
+Images were uploading successfully but failing to display with 404 errors. The issue was a combination of path mismatches and Nginx proxy configuration.
+
+#### Critical Fix: Path Resolution
+**FastAPI Configuration** (`backend/app/main.py`):
+- Files stored in `/opt/triphoto/backend/uploads/` not `/opt/triphoto/uploads/`
+- Added absolute path conversion for StaticFiles mounting
+- Added debugging logs for troubleshooting
+
+```python
+# Environment-based upload directory configuration
+uploads_dir = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "uploads"))
+
+# 절대 경로로 변환 - Critical for production deployment
+uploads_dir = os.path.abspath(uploads_dir)
+
+# StaticFiles 마운트
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+```
+
+#### Nginx Reverse Proxy Configuration
+**Critical Fix** (`sites-available.txt`):
+- Changed from problematic regex pattern to simple location block
+- Direct proxy pass to FastAPI StaticFiles
+
+```nginx
+# 업로드된 파일 서빙 (FastAPI를 통해) - 단일 포트 최적화
+location /uploads/ {
+    proxy_pass http://127.0.0.1:8000/uploads/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto http;
+    
+    # 이미지 캐시 설정 (성능 최적화)
+    expires 1d;
+    add_header Cache-Control "public";
+}
+```
+
+#### Environment Configuration
+**Production Setup** (`zstus.synology.me:8095`):
+
+Backend (`.env`):
+```env
+UPLOAD_DIR=uploads
+ALLOWED_ORIGINS=http://zstus.synology.me:8095,https://zstus.synology.me:8095
+SECURITY_HEADERS_CSP_CONNECT_SRC=http://zstus.synology.me:8095 https://zstus.synology.me:8095
+SECURITY_HEADERS_HSTS=false
+```
+
+Frontend (`.env.production`):
+```env
+REACT_APP_API_URL=http://zstus.synology.me:8095/api
+```
+
+#### Architecture Flow
+1. **Frontend Request**: `zstus.synology.me:8095/uploads/file.jpg`
+2. **Nginx Proxy**: Routes to `127.0.0.1:8000/uploads/file.jpg`
+3. **FastAPI StaticFiles**: Serves from absolute path `/opt/triphoto/backend/uploads/`
+4. **File Storage**: Actual files in `/opt/triphoto/backend/uploads/room_id/file.jpg`
+
+#### Debugging Tools
+Added debug endpoint for troubleshooting:
+```python
+@app.get("/debug/uploads")
+async def debug_uploads(request: Request):
+    # Returns upload directory status, contents, and path information
+```
+
 ### Cross-Platform Network Access
 The frontend API client (`services/api.ts`) automatically determines the correct API URL:
 - Development: `http://localhost:8000/api`
@@ -117,10 +190,11 @@ The frontend API client (`services/api.ts`) automatically determines the correct
 - Production: Environment variable `REACT_APP_API_URL`
 
 ### Security Considerations
-- CORS enabled for all origins (development setup)
+- CORS enabled for specific origins via environment variables
 - File type validation (images only)
 - SQL injection prevention via parameterized queries
 - UUID-based resource identification
+- Path traversal protection in file serving
 
 ## Common Development Patterns
 
